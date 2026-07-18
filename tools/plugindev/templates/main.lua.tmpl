@@ -1,0 +1,45 @@
+local plugin = {
+  name = "{{.Plg.Name}}",
+  tools = {},
+  stages = {},
+  settings = {}
+}
+
+function plugin:start(sdk)
+  sdk.log("{{.Plg.Name}} plugin starting...")
+
+  -- Register a configuration setting
+  -- sdk.settings.register({
+  --   key = "{{.Plg.Name}}.example",
+  --   default = "hello",
+  --   type = "string",
+  --   display_name = "Example Config",
+  --   description = "An example configuration key"
+  -- })
+
+  -- Register a tool
+  local ok = sdk:register_tool("{{.Plg.Name}}_hello", {
+    name = "{{.Plg.Name}}_hello",
+    description = "A hello world tool",
+    parameters = {
+      type = "object",
+      properties = {}
+    }
+  }, function(args)
+    return { content = "Hello from {{.Plg.Name}} plugin!" }
+  end)
+
+  if not ok then
+    sdk.log("error: failed to register tool")
+    return false
+  end
+
+  sdk.log("{{.Plg.Name}} plugin started")
+  return true
+end
+
+function plugin:stop()
+  return true
+end
+
+return plugin

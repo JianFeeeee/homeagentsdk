@@ -1,0 +1,55 @@
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"gitcode.com/JianFeeeee/homeagent-sdk/sdk"
+)
+
+type Plugin struct {
+	name string
+	sdk  *sdk.PluginSDK
+}
+
+func NewPlugin(name string, config map[string]interface{}) (sdk.Plugin, error) {
+	return &Plugin{name: name}, nil
+}
+
+func (p *Plugin) Name() string { return p.name }
+
+func (p *Plugin) Start(s *sdk.PluginSDK) error {
+	p.sdk = s
+
+	s.Settings().RegisterDef(sdk.ConfigDef{
+		Key:         "plugin.{{.Plg.Name}}.example",
+		Default:     "hello",
+		Type:        "string",
+		DisplayName: "示例配置",
+		Description: "An example configuration key",
+		Category:    "{{.Plg.Name}}",
+	})
+
+	tp := p.name + "_"
+	s.RegisterTool(tp+"hello", sdk.ToolDef{
+		Name:        tp + "hello",
+		Description: "A hello world tool",
+		Parameters: map[string]interface{}{
+			"type":       "object",
+			"properties": map[string]interface{}{},
+		},
+	}, p.handleHello)
+
+	fmt.Printf("[%s] started\n", p.name)
+	return nil
+}
+
+func (p *Plugin) Stop() error {
+	fmt.Printf("[%s] stopped\n", p.name)
+	return nil
+}
+
+func (p *Plugin) handleHello(args map[string]interface{}) (interface{}, error) {
+	return map[string]interface{}{
+		"content": "Hello from {{.Plg.Name}} plugin!",
+	}, nil
+}

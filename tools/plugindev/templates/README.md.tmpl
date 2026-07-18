@@ -1,0 +1,19 @@
+# {{.Plg.Name}}
+
+{{.Plg.Description}}
+
+## Build
+
+```bash
+plugindev build
+```
+
+## Install
+
+Upload the `.hmap` file through the Plugin Manager API:
+
+```bash
+curl -X POST http://localhost:8080/api/v1/plugins \
+  -H "Content-Type: application/octet-stream" \
+  --data-binary @dist/<name_en_snake>_linux_amd64.hmap
+```
