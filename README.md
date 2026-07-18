@@ -160,15 +160,13 @@ enabled := sdk.AutoRestart()
 | 插件 | 说明 |
 |------|------|
 | a2a | Agent-to-Agent 协议通信 |
-| bili | Bilibili 数据获取 |
+| browser | 网络搜索、网页抓取、浏览器渲染、视频下载（合并自 web/webfetch/bili） |
 | editdoc | 文档编辑 |
 | files | 文件管理 |
 | memo | 备忘录/记忆 |
 | ocr | 光学字符识别 |
 | qq | QQ 消息集成 |
 | sanitizer | 内容清洗/安全过滤 |
-| web | 网页浏览与交互 |
-| webfetch | 网页内容抓取 |
 
 ## 构建与安装
 

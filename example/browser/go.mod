@@ -1,4 +1,4 @@
-module web
+module browser
 
 go 1.25.0
 

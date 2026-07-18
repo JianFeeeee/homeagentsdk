@@ -1503,7 +1503,7 @@ func (p *Plugin) processMessageSegments(segments []interface{}) string {
 	os.MkdirAll(p.filesDir, 0755)
 	botIDStr := strconv.FormatInt(p.botID, 10)
 	var parts []string
-	type dlItem struct{ fileID, name string }
+	type dlItem struct{ fileID, name, url string }
 	var dlQueue []dlItem
 
 	for _, seg := range segments {
@@ -1544,7 +1544,7 @@ func (p *Plugin) processMessageSegments(segments []interface{}) string {
 				sizeDesc = fmt.Sprintf(" (%.1f MB)", float64(s)/1048576)
 			}
 			if fid != "" {
-				dlQueue = append(dlQueue, dlItem{fid, name})
+				dlQueue = append(dlQueue, dlItem{fileID: fid, name: name})
 			}
 			if name != "" {
 				parts = append(parts, fmt.Sprintf("[文件:%s%s]", name, sizeDesc))
@@ -1554,8 +1554,11 @@ func (p *Plugin) processMessageSegments(segments []interface{}) string {
 		case "image":
 			fid, _ := data["file"].(string)
 			summary, _ := data["summary"].(string)
+			imgURL, _ := data["url"].(string)
 			if fid != "" {
-				dlQueue = append(dlQueue, dlItem{fid, "image_" + fid + ".jpg"})
+				dlQueue = append(dlQueue, dlItem{fileID: fid, name: "image_" + fid + ".jpg", url: imgURL})
+			} else if imgURL != "" {
+				dlQueue = append(dlQueue, dlItem{url: imgURL, name: "image_" + filepath.Base(imgURL)})
 			}
 			label := "图片"
 			if summary != "" {
@@ -1564,8 +1567,11 @@ func (p *Plugin) processMessageSegments(segments []interface{}) string {
 			parts = append(parts, fmt.Sprintf("[%s]", label))
 		case "video":
 			fid, _ := data["file"].(string)
+			videoURL, _ := data["url"].(string)
 			if fid != "" {
-				dlQueue = append(dlQueue, dlItem{fid, "video_" + fid + ".mp4"})
+				dlQueue = append(dlQueue, dlItem{fileID: fid, name: "video_" + fid + ".mp4", url: videoURL})
+			} else if videoURL != "" {
+				dlQueue = append(dlQueue, dlItem{url: videoURL, name: "video_" + filepath.Base(videoURL)})
 			}
 			parts = append(parts, "[视频]")
 		case "reply":
@@ -1597,7 +1603,7 @@ func (p *Plugin) processMessageSegments(segments []interface{}) string {
 	if len(dlQueue) > 0 {
 		go func(items []dlItem) {
 			for _, item := range items {
-				p.downloadFile(item.fileID, item.name)
+				p.downloadFile(item.fileID, item.name, item.url)
 			}
 		}(dlQueue)
 	}
@@ -1605,11 +1611,33 @@ func (p *Plugin) processMessageSegments(segments []interface{}) string {
 	return strings.TrimSpace(strings.Join(parts, " "))
 }
 
-func (p *Plugin) downloadFile(fileID, filename string) string {
-	if fileID == "" || p.filesDir == "" {
+func (p *Plugin) downloadFile(fileID, filename, fileURL string) string {
+	if p.filesDir == "" {
 		return ""
 	}
 	os.MkdirAll(p.filesDir, 0755)
+
+	// 优先使用 URL 直下（NapCat 消息 data 中的 url 字段）
+	if fileURL != "" {
+		if filename == "" {
+			filename = "file_" + filepath.Base(fileURL)
+		}
+		filename = sanitizeFilename(filename)
+		localPath := filepath.Join(p.filesDir, filename)
+		dlResp, err := p.httpClient.Get(fileURL)
+		if err == nil {
+			defer dlResp.Body.Close()
+			data, err := io.ReadAll(dlResp.Body)
+			if err == nil && len(data) > 0 {
+				os.WriteFile(localPath, data, 0644)
+				return localPath
+			}
+		}
+	}
+
+	if fileID == "" {
+		return ""
+	}
 
 	// 处理 base64:// 前缀的内嵌文件
 	if strings.HasPrefix(fileID, "base64://") {
@@ -1651,7 +1679,7 @@ func (p *Plugin) downloadFile(fileID, filename string) string {
 		} `json:"data"`
 	}
 	if json.Unmarshal([]byte(rawStr), &resp) != nil || resp.Data == nil {
-		log.Printf("[qq] parse get_file %s: bad response", fileID)
+		log.Printf("[qq] get_file %s: bad response (NapCat returned no data, fileID=%q url=%q)", fileID, fileID, fileURL)
 		return ""
 	}
 	info := resp.Data
@@ -1676,7 +1704,7 @@ func (p *Plugin) downloadFile(fileID, filename string) string {
 
 	// 其次 URL 下载
 	if info.URL != "" {
-		dlResp, err := http.Get(info.URL)
+		dlResp, err := p.httpClient.Get(info.URL)
 		if err == nil {
 			defer dlResp.Body.Close()
 			data, err := io.ReadAll(dlResp.Body)
