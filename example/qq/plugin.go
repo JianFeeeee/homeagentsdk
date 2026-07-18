@@ -716,9 +716,9 @@ func (p *Plugin) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	outputTool := "output_send__" + p.name
 	var interrupt string
 	if evt.MessageType == "group" {
-		interrupt = fmt.Sprintf("来自%s的（%s）群聊消息，通过id%d使用%sget_message工具获取消息正文。如果消息包含引用回复，使用%sget_history（group_id=%d）拉取最近消息以确认引用上下文。获取后使用%s工具回复该群聊（用%s_help查看JSON格式要求）", nickname, groupName, localID, tp, tp, evt.GroupID, outputTool, outputTool)
+		interrupt = fmt.Sprintf("来自%s的（%s）群聊消息，通过id%d使用%sget_message工具获取消息正文。如果消息包含引用回复，使用%sget_history（group_id=%d）拉取最近消息以确认引用上下文。必须使用%s工具回复该群聊（用%s_help查看JSON格式要求），系统不会自动发送回复", nickname, groupName, localID, tp, tp, evt.GroupID, outputTool, outputTool)
 	} else {
-		interrupt = fmt.Sprintf("来自%s的私聊消息，通过id%d使用%sget_message工具获取消息正文。如果消息包含引用回复，使用%sget_history（user_id=%d）拉取最近消息以确认引用上下文。获取后使用%s工具回复对方（用%s_help查看JSON格式要求）", nickname, localID, tp, tp, evt.UserID, outputTool, outputTool)
+		interrupt = fmt.Sprintf("来自%s的私聊消息，通过id%d使用%sget_message工具获取消息正文。如果消息包含引用回复，使用%sget_history（user_id=%d）拉取最近消息以确认引用上下文。必须使用%s工具回复对方（用%s_help查看JSON格式要求），系统不会自动发送回复", nickname, localID, tp, tp, evt.UserID, outputTool, outputTool)
 	}
 	if p.adminID > 0 && evt.UserID == p.adminID {
 		interrupt = "【重要！老大消息】" + interrupt
