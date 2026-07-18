@@ -11,7 +11,6 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -28,7 +27,6 @@ type Plugin struct {
 	timeout    int
 	proxy      string
 	client     *http.Client
-	outputDir  string
 }
 
 func newHTTPClient(timeout int, proxyURL string) *http.Client {
@@ -74,12 +72,6 @@ func (p *Plugin) Start(s *sdk.PluginSDK) error {
 		DisplayName: "HTTP 代理", Description: "HTTP 代理地址，如 http://proxy:port。为空则不使用代理",
 		Category: "browser",
 	})
-	s.Settings().RegisterDef(sdk.ConfigDef{
-		Key: "plugin.browser.output_dir", Default: "/tmp/browser_videos", Type: "string",
-		DisplayName: "视频下载目录", Description: "视频下载后的保存目录",
-		Category: "browser",
-	})
-
 	t := getSetting[float64](s.Settings(), "timeout", 30)
 	p.timeout = int(t)
 	if p.timeout < 5 { p.timeout = 5 }
@@ -87,8 +79,6 @@ func (p *Plugin) Start(s *sdk.PluginSDK) error {
 
 	p.proxy = getSetting[string](s.Settings(), "proxy", "")
 	p.client = newHTTPClient(p.timeout, p.proxy)
-
-	p.outputDir = getSetting[string](s.Settings(), "output_dir", "/tmp/browser_videos")
 
 	tp := p.name + "_"
 
@@ -131,21 +121,7 @@ func (p *Plugin) Start(s *sdk.PluginSDK) error {
 		},
 	}, p.handleRender)
 
-	s.RegisterTool(tp+"video", sdk.ToolDef{
-		Name: tp + "video",
-		Description: "Download a video from supported sites (Bilibili, YouTube, etc.) using yt-dlp. Supports viewing video info before downloading.",
-		Parameters: map[string]interface{}{
-			"type": "object",
-			"properties": map[string]interface{}{
-				"url":       map[string]interface{}{"type": "string", "description": "Video URL (Bilibili, YouTube, etc.)"},
-				"info_only": map[string]interface{}{"type": "boolean", "description": "Only fetch video info (title, available formats), do not download"},
-				"format":    map[string]interface{}{"type": "string", "description": "Format ID (e.g. 30112=1080P), auto-selects best if not specified"},
-			},
-			"required": []string{"url"},
-		},
-	}, p.handleVideo)
-
-	log.Printf("[%s] started, timeout=%ds proxy=%q output=%s", p.name, p.timeout, p.proxy, p.outputDir)
+	log.Printf("[%s] started, timeout=%ds proxy=%q", p.name, p.timeout, p.proxy)
 	return nil
 }
 
@@ -464,136 +440,6 @@ sys.stdout.write(text)
 	if truncated { result += fmt.Sprintf("\n\n...（内容过长，仅显示前 5000 字符，共 %d 字符）", origLen) }
 
 	return map[string]interface{}{"content": result, "title": title}, nil
-}
-
-// ── Video Download ────────────────────────────────────────
-
-type ytdlpFormat struct {
-	FormatID       string  `json:"format_id"`
-	FormatNote     string  `json:"format_note"`
-	Ext            string  `json:"ext"`
-	Width          int     `json:"width"`
-	Height         int     `json:"height"`
-	TBR            float64 `json:"tbr"`
-	Filesize       int64   `json:"filesize"`
-	FilesizeApprox int64   `json:"filesize_approx"`
-	VCodec         string  `json:"vcodec"`
-	ACodec         string  `json:"acodec"`
-	FPS            float64 `json:"fps"`
-}
-
-type ytdlpInfo struct {
-	Title      string        `json:"title"`
-	Duration   float64       `json:"duration"`
-	WebpageURL string        `json:"webpage_url"`
-	Filename   string        `json:"_filename"`
-	Formats    []ytdlpFormat `json:"formats"`
-}
-
-func (p *Plugin) handleVideo(args map[string]interface{}) (interface{}, error) {
-	rawURL, _ := args["url"].(string)
-	if rawURL == "" { return nil, fmt.Errorf("url is required") }
-	infoOnly, _ := args["info_only"].(bool)
-	format, _ := args["format"].(string)
-
-	os.MkdirAll(p.outputDir, 0755)
-
-	var out bytes.Buffer
-	ytdlpArgs := []string{"--no-warnings", "--dump-json", rawURL}
-	cmd := exec.Command("yt-dlp", ytdlpArgs...)
-	cmd.Stdout = &out
-	cmd.Stderr = &out
-	proxyEnv := "http://127.0.0.1:7890"
-	if p.proxy != "" { proxyEnv = p.proxy }
-	cmd.Env = append(os.Environ(), "HTTP_PROXY="+proxyEnv, "HTTPS_PROXY="+proxyEnv)
-	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("yt-dlp info: %w\n%s", err, strings.TrimSpace(out.String()))
-	}
-
-	var info ytdlpInfo
-	if err := json.Unmarshal(out.Bytes(), &info); err != nil {
-		return nil, fmt.Errorf("parse yt-dlp output: %w", err)
-	}
-
-	if infoOnly {
-		var filtered []ytdlpFormat
-		for _, f := range info.Formats {
-			if f.VCodec != "none" || f.ACodec != "none" { filtered = append(filtered, f) }
-		}
-		info.Formats = filtered
-
-		lines := []string{fmt.Sprintf("标题: %s", info.Title)}
-		if info.Duration > 0 { lines = append(lines, fmt.Sprintf("时长: %.0f 秒", info.Duration)) }
-
-		type fmtLine struct{ ID, Note, Res, Ext, Size string }
-		var seen []string
-		var display []fmtLine
-		for _, f := range info.Formats {
-			if f.FormatNote == "" { continue }
-			key := f.FormatNote + f.Ext
-			if contains(seen, key) { continue }
-			seen = append(seen, key)
-			res := ""
-			if f.Width > 0 && f.Height > 0 { res = fmt.Sprintf("%dx%d", f.Width, f.Height) }
-			sz := ""
-			fs := f.Filesize
-			if fs == 0 { fs = f.FilesizeApprox }
-			if fs > 0 { sz = fmt.Sprintf(" (%.1f MB)", float64(fs)/1048576) }
-			display = append(display, fmtLine{ID: f.FormatID, Note: f.FormatNote, Res: res, Ext: f.Ext, Size: sz})
-		}
-		if len(display) > 0 {
-			lines = append(lines, "清晰度列表:")
-			for _, d := range display {
-				r := d.Res
-				if r != "" { r = " " + r }
-				lines = append(lines, fmt.Sprintf("  [%s] %s%s | %s%s", d.ID, d.Note, r, d.Ext, d.Size))
-			}
-		}
-		return map[string]interface{}{"content": strings.Join(lines, "\n")}, nil
-	}
-
-	dlArgs := []string{
-		"--no-warnings", "--socket-timeout", "30",
-		"--retries", "3", "--fragment-retries", "3",
-		"-o", filepath.Join(p.outputDir, "%(title)s.%(ext)s"),
-		"--no-overwrites",
-	}
-	if format != "" { dlArgs = append(dlArgs, "-f", format) }
-	dlArgs = append(dlArgs, rawURL)
-	cmd2 := exec.Command("yt-dlp", dlArgs...)
-	cmd2.Env = append(os.Environ(), "HTTP_PROXY="+proxyEnv, "HTTPS_PROXY="+proxyEnv)
-	var dlOut bytes.Buffer
-	cmd2.Stdout = &dlOut
-	cmd2.Stderr = &dlOut
-	if err := cmd2.Run(); err != nil {
-		return nil, fmt.Errorf("yt-dlp download: %w\n%s", err, strings.TrimSpace(dlOut.String()))
-	}
-
-	var newest string
-	var newestTime int64
-	entries, _ := os.ReadDir(p.outputDir)
-	for _, e := range entries {
-		if e.IsDir() { continue }
-		if fi, _ := e.Info(); fi != nil {
-			if t := fi.ModTime().Unix(); t > newestTime { newestTime = t; newest = e.Name() }
-		}
-	}
-	if newest == "" {
-		return map[string]interface{}{"content": "下载完成，但未找到视频文件"}, nil
-	}
-	dlPath := filepath.Join(p.outputDir, newest)
-	fi, _ := os.Stat(dlPath)
-	var fileSize int64
-	if fi != nil { fileSize = fi.Size() }
-	return map[string]interface{}{
-		"content":  fmt.Sprintf("下载完成: %s (%.1f MB)\n路径: %s", newest, float64(fileSize)/1048576, dlPath),
-		"file":     dlPath, "filename": newest,
-	}, nil
-}
-
-func contains(slice []string, s string) bool {
-	for _, v := range slice { if v == s { return true } }
-	return false
 }
 
 func NewPlugin(name string, config map[string]interface{}) (sdk.Plugin, error) {

@@ -3,9 +3,9 @@
   "name_zh": "浏览器",
   "name_en": "browser",
   "version": "1.0.0",
-  "description": "网络资源搜索与获取：搜索引擎查询（browser_search）、网页抓取（browser_fetch，SSRF防护）、无头浏览器渲染（browser_render）、视频下载（browser_video，基于yt-dlp）",
+  "description": "网络资源搜索与获取：搜索引擎查询（browser_search）、网页抓取（browser_fetch，SSRF防护）、无头浏览器渲染（browser_render）",
   "author": "HomeAgent",
   "entry": "plugin.so",
-  "tags": ["web", "search", "fetch", "video", "browser"],
+  "tags": ["web", "search", "fetch", "browser"],
   "targets": "linux/amd64"
 }
