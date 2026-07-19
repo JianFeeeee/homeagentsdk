@@ -90,7 +90,7 @@ func cmdInit(args []string) {
 
 	// Detect SDK info for Go plugin go.mod
 	if !isLua {
-		sdkMod, goVer, sdkPath := detectSDKInfo()
+		sdkMod, goVer, sdkPath, sdkVer := detectSDKInfo()
 		sdkReplace := sdkPath
 		// Make replace path absolute and use forward slashes
 		if abs, err := filepath.Abs(sdkPath); err == nil {
@@ -99,7 +99,7 @@ func cmdInit(args []string) {
 		data.ModulePath = name
 		data.GoVersion = goVer
 		data.SDKModule = sdkMod
-		data.SDKVersion = "v0.0.0"
+		data.SDKVersion = "v" + sdkVer
 		data.SDKReplace = sdkReplace
 	}
 
@@ -137,8 +137,8 @@ func cmdInit(args []string) {
 	fmt.Printf("  cd %s && plugindev build\n", dir)
 }
 
-// detectSDKInfo reads the HomeAgent SDK's go.mod to get module path and go version.
-func detectSDKInfo() (modulePath, goVersion, sdkPath string) {
+// detectSDKInfo reads the HomeAgent SDK's go.mod and meta to get module path, go version, and SDK version.
+func detectSDKInfo() (modulePath, goVersion, sdkPath, sdkVersion string) {
 	root := activeSDKRoot()
 	gomodPath := filepath.Join(root, "go.mod")
 	data, err := os.ReadFile(gomodPath)
@@ -163,7 +163,8 @@ func detectSDKInfo() (modulePath, goVersion, sdkPath string) {
 	if goVersion == "" {
 		goVersion = "1.21"
 	}
-	return modulePath, goVersion, root
+	sdkVersion = readMetaVersion(root)
+	return modulePath, goVersion, root, sdkVersion
 }
 
 func writeTemplate(path, content string, data TemplateData) {
