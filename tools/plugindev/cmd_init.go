@@ -4,24 +4,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"text/template"
 )
 
-// sdkRoot is the HomeAgent SDK root directory, computed at init time from source location.
-var sdkRoot string
-
 const cabiVersion = 1
-
-func init() {
-	_, filename, _, ok := runtime.Caller(0)
-	if !ok {
-		return
-	}
-	// filename: <sdk_root>/tools/plugindev/cmd_init.go
-	sdkRoot = filepath.Dir(filepath.Dir(filepath.Dir(filename)))
-}
 
 type PlgConfig struct {
 	Name        string   `json:"name"`
@@ -152,11 +139,8 @@ func cmdInit(args []string) {
 
 // detectSDKInfo reads the HomeAgent SDK's go.mod to get module path and go version.
 func detectSDKInfo() (modulePath, goVersion, sdkPath string) {
-	if sdkRoot == "" {
-		fmt.Printf("error: cannot detect SDK root (built outside SDK tree?)\n")
-		os.Exit(1)
-	}
-	gomodPath := filepath.Join(sdkRoot, "go.mod")
+	root := activeSDKRoot()
+	gomodPath := filepath.Join(root, "go.mod")
 	data, err := os.ReadFile(gomodPath)
 	if err != nil {
 		fmt.Printf("error: cannot read SDK go.mod at %s: %v\n", gomodPath, err)
@@ -179,7 +163,7 @@ func detectSDKInfo() (modulePath, goVersion, sdkPath string) {
 	if goVersion == "" {
 		goVersion = "1.21"
 	}
-	return modulePath, goVersion, sdkRoot
+	return modulePath, goVersion, root
 }
 
 func writeTemplate(path, content string, data TemplateData) {

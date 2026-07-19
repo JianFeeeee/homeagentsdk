@@ -19,19 +19,22 @@ func main() {
 		cmdClean(os.Args[2:])
 	case "debug":
 		cmdDebug(os.Args[2:])
+	case "sdk":
+		cmdSDK(os.Args[2:])
 	default:
 		help()
 	}
 }
 
 func help() {
-	fmt.Println(`HomeAgent Plugin Dev Tool
+	fmt.Print(`HomeAgent Plugin Dev Tool
 
 Usage:
   plugindev init <name>           Scaffold a new plugin project
   plugindev build [flags]         Compile and package plugin
   plugindev clean                 Clean build/dist artifacts
   plugindev debug [dir]           Interpret and debug plugin source
+  plugindev sdk <command>         Manage SDK versions
 
 Flags:
   --outdir    Output directory (default: dist)
