@@ -286,8 +286,8 @@ func (s *PluginSDK) RegisterPluginAPI(name string) error {
 // RegisterOutputChannel registers an output channel that the output_send tool can route to.
 // name: channel name (e.g. "qq", "webui")
 // caps: bitmask of supported output capabilities (CapText, CapFile, etc.)
-// desc: description of the channel and expected JSON format for content
-// handler: receives the content (JSON string) and returns result/error
+// desc: description of the channel, expected meta format, and type enum
+// handler: receives args map with keys: payload (string), type (string), meta (string|optional)
 func (s *PluginSDK) RegisterOutputChannel(name string, caps int, desc string, handler ToolHandler) error {
 	if s.regOutput != nil {
 		return s.regOutput(name, caps, desc, handler)

@@ -53,6 +53,11 @@ sdk.RegisterStage(StageBeforeToolcall, myHandler, StageScopeOwnTools)
 sdk.RegisterOutputChannel("my-channel", CapText|CapFile, "通道描述", handler)
 ```
 
+handler 接收三个参数：
+- `payload` (string) — 消息载荷。`type=text` 时直接填文字，`type=file/image` 时填 URL
+- `meta` (string) — 可选的 JSON 路由元数据（如 `{"group_id":123,"user_id":456}`）
+- `type` (string) — 载荷类型，枚举值见下
+
 能力标志位：
 
 | 标志 | 值 | 说明 |
@@ -62,6 +67,15 @@ sdk.RegisterOutputChannel("my-channel", CapText|CapFile, "通道描述", handler
 | `CapImage` | 4 | 图片输出 |
 | `CapAudio` | 8 | 音频输出 |
 | `CapStructured` | 16 | 结构化数据输出 |
+
+type 枚举值：
+
+| 值 | 说明 |
+|----|------|
+| `text` | 纯文本 |
+| `voice` / `audio` | 语音 |
+| `image` | 图片 |
+| `file` | 文件 |
 
 ### IOInjector 通道路由
 

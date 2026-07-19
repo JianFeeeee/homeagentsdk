@@ -53,6 +53,11 @@ sdk.RegisterStage(StageBeforeToolcall, myHandler, StageScopeOwnTools)
 sdk.RegisterOutputChannel("my-channel", CapText|CapFile, "channel description", handler)
 ```
 
+The handler receives three arguments:
+- `payload` (string) — message content. For `type=text` it's plain text, for `type=file/image` it's a URL
+- `meta` (string) — optional JSON routing metadata (e.g. `{"group_id":123,"user_id":456}`)
+- `type` (string) — content type enum (see below)
+
 Capability flags:
 
 | Flag | Value | Description |
@@ -62,6 +67,15 @@ Capability flags:
 | `CapImage` | 4 | Image output |
 | `CapAudio` | 8 | Audio output |
 | `CapStructured` | 16 | Structured data output |
+
+Type enum values:
+
+| Value | Description |
+|-------|-------------|
+| `text` | plain text |
+| `voice` / `audio` | audio/voice |
+| `image` | image |
+| `file` | file |
 
 ### IOInjector Channel Routing
 
