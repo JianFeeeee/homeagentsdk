@@ -170,13 +170,14 @@ func (p *Plugin) Start(s *sdk.PluginSDK) error {
 
 	// ---- 注册输出通道 ----
 	s.RegisterOutputChannel("qq", sdk.CapText|sdk.CapFile|sdk.CapImage|sdk.CapAudio,
-		`发送QQ群聊/私聊消息，支持文字和语音。content JSON 格式：
+		`发送QQ群聊/私聊消息，支持文字、语音、图片、文件。
+meta JSON 格式：
 {
-  "content": "消息正文（必填）",
   "group_id": 123456,       // 群号（与 user_id 二选一）
   "user_id": 123456,        // QQ号（与 group_id 二选一）
-  "as_voice": false         // 可选，true 则将文本转为语音发送（使用 edge-tts）
-}`,
+  "reply_to": 12345         // 可选，回复指定消息 ID
+}
+type 枚举: text（文字）/ voice（语音转文字后发送）/ image（图片URL）/ file（文件URL）`,
 		p.handleChannelOutput)
 
 	// ---- 消息 ----
@@ -841,85 +842,56 @@ func (p *Plugin) handleGetMessage(args map[string]interface{}) (interface{}, err
 	return result, nil
 }
 
-// fixJSON 尝试修复 LLM 生成的常见 JSON 格式错误：
-// 未转义的双引号出现在字符串值内（如 "content":"他说"你好""）
-func fixJSON(raw string) string {
-	var test interface{}
-	if json.Unmarshal([]byte(raw), &test) == nil {
-		return raw
-	}
-
-	contentPrefix := `"content":"`
-	idx := strings.Index(raw, contentPrefix)
-	if idx < 0 {
-		return raw
-	}
-	start := idx + len(contentPrefix)
-
-	suffixPatterns := []string{`","user_id`, `","group_id`, `","as_voice`, `"}`}
-	bestEnd := -1
-	for _, suffix := range suffixPatterns {
-		if j := strings.Index(raw[start:], suffix); j >= 0 {
-			end := start + j
-			if bestEnd < 0 || end < bestEnd {
-				bestEnd = end
-			}
-		}
-	}
-	if bestEnd < 0 {
-		return raw
-	}
-
-	contentVal := raw[start:bestEnd]
-	var b strings.Builder
-	b.Grow(len(contentVal) + 4)
-	for i := 0; i < len(contentVal); i++ {
-		if contentVal[i] == '\\' && i+1 < len(contentVal) {
-			b.WriteByte(contentVal[i])
-			i++
-			b.WriteByte(contentVal[i])
-			continue
-		}
-		if contentVal[i] == '"' {
-			b.WriteByte('\\')
-		}
-		b.WriteByte(contentVal[i])
-	}
-	escaped := b.String()
-	return raw[:start] + escaped + raw[bestEnd:]
-}
-
 // handleChannelOutput — output_send(channel="qq") 的处理器
-// content 参数为 JSON 字符串，格式：
-//   {"content":"消息正文","group_id":123}
-//   {"content":"消息正文","user_id":456,"as_voice":true}
+// args 包含 payload, type, (可选 meta)
 func (p *Plugin) handleChannelOutput(args map[string]interface{}) (interface{}, error) {
-	content, _ := args["content"].(string)
-	log.Printf("[qq] handleChannelOutput content=%q type=%T len=%d", content, args["content"], len(content))
-	if content == "" {
-		return nil, fmt.Errorf("content 参数是必需的 JSON 字符串。请用 output_send__qq_help 查看格式说明")
+	payload, _ := args["payload"].(string)
+	rawType, _ := args["type"].(string)
+	meta, _ := args["meta"].(string)
+	log.Printf("[qq] handleChannelOutput payload=%q type=%s meta=%s", payload, rawType, meta)
+	if payload == "" || rawType == "" {
+		return nil, fmt.Errorf("payload 和 type 参数不能为空")
 	}
 
-	var msg struct {
-		Content string `json:"content"`
-		UserID  int64  `json:"user_id,omitempty"`
-		GroupID int64  `json:"group_id,omitempty"`
-		AsVoice bool   `json:"as_voice,omitempty"`
-	}
-	if err := json.Unmarshal([]byte(content), &msg); err != nil || msg.Content == "" {
-		fixed := fixJSON(content)
-		if err2 := json.Unmarshal([]byte(fixed), &msg); err2 != nil || msg.Content == "" {
-			help := p.buildOutputHelp()
-			return nil, fmt.Errorf("content 参数 JSON 格式错误（%v）。检查 content 字段值内的双引号是否已用 \\ 转义，以及整个 JSON 是否合法。\n\n正确的格式示例：\n%s", err, help)
+	// 解析 meta
+	var groupID, userID int64
+	var replyTo int64
+	if meta != "" {
+		var m struct {
+			GroupID int64 `json:"group_id"`
+			UserID  int64 `json:"user_id"`
+			ReplyTo int64 `json:"reply_to"`
 		}
-		log.Printf("[qq] JSON auto-fixed by escaping quotes: %q -> %q", content, fixed)
+		if err := json.Unmarshal([]byte(meta), &m); err == nil {
+			groupID = m.GroupID
+			userID = m.UserID
+			replyTo = m.ReplyTo
+		}
+	}
+	if groupID == 0 && userID == 0 {
+		return nil, fmt.Errorf("meta 中需要 group_id 或 user_id 字段。用 output_send__qq_help 查看格式说明")
 	}
 
-	text := p.sensitiveFilter(msg.Content)
+	switch rawType {
+	case "text":
+		text := p.sensitiveFilter(payload)
+		msg := map[string]interface{}{"message": text}
+		if groupID != 0 {
+			msg["group_id"] = groupID
+		} else {
+			msg["user_id"] = userID
+		}
+		if replyTo > 0 {
+			msg["reply_to"] = replyTo
+		}
+		if groupID != 0 {
+			return p.napcat("send_group_msg", msg)
+		}
+		return p.napcat("send_private_msg", msg)
 
-	// 语音模式：edge-tts 转语音后通过 NapCat 发送
-	if msg.AsVoice {
-		audioFile, err := p.ttsToFile(msg.Content)
+	case "voice", "audio":
+		text := p.sensitiveFilter(payload)
+		audioFile, err := p.ttsToFile(text)
 		if err != nil {
 			return nil, fmt.Errorf("语音生成失败: %w", err)
 		}
@@ -935,34 +907,61 @@ func (p *Plugin) handleChannelOutput(args map[string]interface{}) (interface{}, 
 		os.Remove(audioFile)
 		uri := fmt.Sprintf("file:///app/files/%s", filepath.Base(dest))
 		cqMsg := fmt.Sprintf("[CQ:record,file=%s]", uri)
-		if msg.GroupID != 0 {
-			return p.napcat("send_group_msg", map[string]interface{}{"group_id": msg.GroupID, "message": cqMsg})
+		msg := map[string]interface{}{"message": cqMsg}
+		if groupID != 0 {
+			msg["group_id"] = groupID
+		} else {
+			msg["user_id"] = userID
 		}
-		if msg.UserID != 0 {
-			return p.napcat("send_private_msg", map[string]interface{}{"user_id": msg.UserID, "message": cqMsg})
+		if groupID != 0 {
+			return p.napcat("send_group_msg", msg)
 		}
-		return nil, fmt.Errorf("JSON 中需要 group_id 或 user_id")
-	}
+		return p.napcat("send_private_msg", msg)
 
-	// 文字模式
-	if msg.GroupID != 0 {
-		return p.napcat("send_group_msg", map[string]interface{}{"group_id": msg.GroupID, "message": text})
+	case "image":
+		msg := map[string]interface{}{"message": fmt.Sprintf("[CQ:image,file=%s]", payload)}
+		if groupID != 0 {
+			msg["group_id"] = groupID
+		} else {
+			msg["user_id"] = userID
+		}
+		if groupID != 0 {
+			return p.napcat("send_group_msg", msg)
+		}
+		return p.napcat("send_private_msg", msg)
+
+	case "file":
+		msg := map[string]interface{}{"message": fmt.Sprintf("[CQ:file,file=%s]", payload)}
+		if groupID != 0 {
+			msg["group_id"] = groupID
+		} else {
+			msg["user_id"] = userID
+		}
+		if groupID != 0 {
+			return p.napcat("send_group_msg", msg)
+		}
+		return p.napcat("send_private_msg", msg)
+
+	default:
+		return nil, fmt.Errorf("不支持的 type: %s（枚举值: text/voice/image/file）", rawType)
 	}
-	if msg.UserID != 0 {
-		return p.napcat("send_private_msg", map[string]interface{}{"user_id": msg.UserID, "message": text})
-	}
-	return nil, fmt.Errorf("content JSON 中需要 group_id 或 user_id 字段。请用 output_send__qq_help 查看格式说明")
 }
 
 func (p *Plugin) buildOutputHelp() string {
-	return `群聊回复：{"content":"你的消息正文","group_id":123456789}
-私聊回复：{"content":"你的消息正文","user_id":123456789}
-语音发送：{"content":"你的消息正文","group_id":123456789,"as_voice":true}
+	return `【参数】
+payload — 消息载荷。type=text时直接填文字，type=voice时填文字（自动转语音），type=image/file时填URL
+meta    — JSON 元数据，必含 group_id（群聊）或 user_id（私聊），可选 reply_to
+type    — text / voice / image / file
 
-注意：content 字段值内部如果再出现双引号，必须用反斜杠转义！！！
-错误的例子（双引号未转义）：{"content":"他说"你好"","user_id":123}
-正确的例子（双引号已转义）：{"content":"他说\\"你好\\"","user_id":123}
-另外常见错误：如果正文包含网址或代码，也可能出现未转义的双引号，同样需要转义。`
+【示例】
+群聊文字：output_send__qq(payload="你好", meta="{\"group_id\":123456789}", type="text")
+私聊语音：output_send__qq(payload="你好", meta="{\"user_id\":123456789}", type="voice")
+发送图片：output_send__qq(payload="https://example.com/img.jpg", meta="{\"group_id\":123456789}", type="image")
+
+【注意】
+- type=text 时 payload 直接是文字，无需 JSON 包裹
+- type=voice 时 payload 是文字内容，自动转语音发送
+- type=image/file 时 payload 是 URL 或路径`
 }
 
 // ttsToFile 用 edge-tts 将文本转为音频文件，返回临时文件路径
