@@ -15,6 +15,7 @@ import (
 type BuildConfig struct {
 	OutDir  string
 	Targets []string // "linux/amd64", "windows/amd64", "lua"
+	Bundle  bool
 }
 
 func cmdBuild(args []string) {
@@ -31,6 +32,8 @@ func cmdBuild(args []string) {
 				cfg.Targets = append(cfg.Targets, args[i+1])
 				i++
 			}
+		case "--bundle":
+			cfg.Bundle = true
 		}
 	}
 
@@ -39,6 +42,16 @@ func cmdBuild(args []string) {
 	if err != nil {
 		fmt.Printf("error: read plg.json: %v\n", err)
 		os.Exit(1)
+	}
+
+	if plg.IsLua() {
+		buildTarget(plg, "lua", cfg.OutDir)
+		return
+	}
+
+	if cfg.Bundle {
+		buildBundle(plg, cfg.OutDir)
+		return
 	}
 
 	// determine targets
@@ -54,6 +67,82 @@ func cmdBuild(args []string) {
 	for _, t := range targets {
 		buildTarget(plg, t, cfg.OutDir)
 	}
+}
+
+// allBundleTargets 是 --bundle 模式构建的全部平台。
+// 每个 OS 只有一个架构（amd64），避免二进制文件名冲突。
+var allBundleTargets = []struct {
+	target string
+	entry  string // 二进制在 zip 中的文件名
+}{
+	{"linux/amd64", "plugin.so"},
+	{"darwin/amd64", "plugin.dylib"},
+	{"windows/amd64", "plugin.dll"},
+}
+
+func buildBundle(plg *PlgConfig, outDir string) {
+	os.MkdirAll(outDir, 0755)
+	buildDir := "build"
+	os.MkdirAll(buildDir, 0755)
+
+	// Auto-generate C ABI bridge for non-Windows
+	bridgeCleanup := generateBridge("")
+	defer bridgeCleanup()
+	thirdpartCleanup := linkThirdpart("linux/amd64")
+	defer thirdpartCleanup()
+
+	var binaries []binEntry
+
+	for _, bt := range allBundleTargets {
+		cfg, errMsg := resolveBuild(bt.target)
+		if cfg == nil {
+			fmt.Printf("  error: %s\n", errMsg)
+			return
+		}
+
+		outPath := filepath.Join(buildDir, cfg.entryFile)
+
+		cmd := exec.Command("go", "build", "-buildmode=c-shared", "-o", outPath)
+		cmd.Env = os.Environ()
+		cmd.Env = append(cmd.Env, "GOOS="+cfg.goos, "GOARCH="+cfg.goarch, "CGO_ENABLED=1")
+
+		if cfg.goos == "windows" {
+			cc := detectWindowsCC()
+			if cc != "" {
+				cmd.Env = append(cmd.Env, "CC="+cc)
+			}
+		}
+
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		fmt.Printf("  compiling %s/%s (-buildmode=c-shared)...\n", cfg.goos, cfg.goarch)
+		if err := cmd.Run(); err != nil {
+			fmt.Printf("  error: build %s/%s: %v\n", cfg.goos, cfg.goarch, err)
+			return
+		}
+		binaries = append(binaries, binEntry{src: outPath, zip: bt.entry})
+	}
+
+	// Write plugin.json with all platforms declared
+	platforms := map[string]bool{}
+	for _, bt := range allBundleTargets {
+		parts := strings.SplitN(bt.target, "/", 2)
+		platforms[parts[0]] = true
+	}
+	plats := make([]string, 0, len(platforms))
+	for p := range platforms {
+		plats = append(plats, p)
+	}
+	writePluginJSON(plg, plats, "plugin.so")
+
+	// package single .hmap with correctly named entries
+	hmapPath := filepath.Join(outDir, fmt.Sprintf("%s_bundle.hmap", toSnake(plg.NameEn)))
+	createBundleHmap(hmapPath, "plugin.json", binaries)
+	fmt.Printf("  packaged %s\n", filepath.Base(hmapPath))
+}
+
+func (p *PlgConfig) IsLua() bool {
+	return p.Entry == "main.lua"
 }
 
 func readPlgJSON(path string) (*PlgConfig, error) {
@@ -83,7 +172,7 @@ func parseTargets(raw string) []string {
 	return t
 }
 
-func writePluginJSON(plg *PlgConfig, entry string) {
+func writePluginJSON(plg *PlgConfig, platforms []string, entry string) {
 	m := map[string]interface{}{
 		"name":        plg.Name,
 		"name_zh":     plg.NameZh,
@@ -92,6 +181,9 @@ func writePluginJSON(plg *PlgConfig, entry string) {
 		"description": plg.Description,
 		"author":      plg.Author,
 		"entry":       entry,
+	}
+	if len(platforms) > 0 {
+		m["platforms"] = platforms
 	}
 	if len(plg.Tags) > 0 {
 		m["tags"] = plg.Tags
@@ -120,16 +212,14 @@ func resolveBuild(target string) (*buildConfig, string) {
 	}
 
 	switch goos {
-	case "linux", "darwin", "freebsd", "windows":
-		ext := ".so"
-		if goos == "windows" {
-			ext = ".dll"
-		}
-		return &buildConfig{
-			goos:      goos,
-			goarch:    goarch,
-			entryFile: "plugin" + ext,
-		}, ""
+	case "linux":
+		return &buildConfig{goos: goos, goarch: goarch, entryFile: "plugin.so"}, ""
+	case "darwin":
+		return &buildConfig{goos: goos, goarch: goarch, entryFile: "plugin.dylib"}, ""
+	case "freebsd":
+		return &buildConfig{goos: goos, goarch: goarch, entryFile: "plugin.so"}, ""
+	case "windows":
+		return &buildConfig{goos: goos, goarch: goarch, entryFile: "plugin.dll"}, ""
 	default:
 		return nil, fmt.Sprintf("unsupported OS %q", goos)
 	}
@@ -140,7 +230,7 @@ func buildTarget(plg *PlgConfig, target, outDir string) {
 
 	// Lua: no compilation, package source directly
 	if target == "lua" {
-		writePluginJSON(plg, "main.lua")
+		writePluginJSON(plg, nil, "main.lua")
 		pkgFiles := []string{"plugin.json", "main.lua"}
 		for _, f := range []string{"README.md", "LICENSE"} {
 			if _, err := os.Stat(f); err == nil {
@@ -184,7 +274,7 @@ func buildTarget(plg *PlgConfig, target, outDir string) {
 	defer thirdpartCleanup()
 
 	// Write plugin.json with the correct entry for this target
-	writePluginJSON(plg, cfg.entryFile)
+	writePluginJSON(plg, nil, cfg.entryFile)
 
 	cmd := exec.Command("go", "build", "-buildmode=c-shared", "-o", outPath)
 	cmd.Env = os.Environ()
@@ -223,6 +313,66 @@ func buildTarget(plg *PlgConfig, target, outDir string) {
 	hmapName := fmt.Sprintf("%s_%s_%s.hmap", toSnake(plg.NameEn), cfg.goos, cfg.goarch)
 	createHmap(filepath.Join(outDir, hmapName), pkgFiles)
 	fmt.Printf("  packaged %s\n", hmapName)
+}
+
+type binEntry struct {
+	src string // 磁盘路径，如 build/plugin.so
+	zip string // zip 中条目名，如 plugin.so
+}
+
+// createBundleHmap 创建包含多平台二进制的 bundle .hmap 文件。
+// jsonName 是 plugin.json 在 zip 中的条目名；
+// binaries 的 src 为磁盘路径，zip 为 zip 中的条目名。
+func createBundleHmap(hmapPath, jsonName string, binaries []binEntry) {
+	f, err := os.Create(hmapPath)
+	if err != nil {
+		fmt.Printf("error: create hmap %s: %v\n", hmapPath, err)
+		return
+	}
+	defer f.Close()
+
+	w := zip.NewWriter(f)
+	defer w.Close()
+
+	// Add plugin.json
+	writeZipEntry := func(zipName, diskPath string) {
+		info, err := os.Stat(diskPath)
+		if err != nil {
+			return
+		}
+		hdr, err := zip.FileInfoHeader(info)
+		if err != nil {
+			return
+		}
+		hdr.Method = zip.Deflate
+		hdr.Name = zipName
+		writer, err := w.CreateHeader(hdr)
+		if err != nil {
+			return
+		}
+		src, err := os.Open(diskPath)
+		if err != nil {
+			return
+		}
+		io.Copy(writer, src)
+		src.Close()
+	}
+
+	writeZipEntry(jsonName, jsonName)
+
+	// Add each platform binary with the correct zip entry name
+	for _, b := range binaries {
+		if _, err := os.Stat(b.src); err == nil {
+			writeZipEntry(b.zip, b.src)
+		}
+	}
+
+	// Add optional metadata files
+	for _, fname := range []string{"README.md", "LICENSE"} {
+		if _, err := os.Stat(fname); err == nil {
+			writeZipEntry(fname, fname)
+		}
+	}
 }
 
 func createHmap(hmapPath string, files []string) {
