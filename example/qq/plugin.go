@@ -693,7 +693,7 @@ func (p *Plugin) handleWebhook(w http.ResponseWriter, r *http.Request) {
 				if err != nil {
 					return
 				}
-				raw, _ := resp.(string)
+				raw, _ := rawString(resp)
 				var gi struct {
 					Data *struct {
 						GroupName string `json:"group_name"`
@@ -1063,7 +1063,7 @@ func (p *Plugin) handleGetHistory(args map[string]interface{}) (interface{}, err
 	if err != nil {
 		return nil, err
 	}
-	rawStr, _ := rawResp.(string)
+	rawStr, _ := rawString(rawResp)
 	if rawStr == "" {
 		return map[string]interface{}{"messages": []interface{}{}, "note": "未获取到历史消息"}, nil
 	}
@@ -1159,7 +1159,7 @@ func (p *Plugin) handleResolveNickname(args map[string]interface{}) (interface{}
 		if err != nil {
 			return nil, err
 		}
-		raw, _ := v.(string)
+		raw, _ := rawString(v)
 		return filterMemberList(raw, keyword)
 	}
 
@@ -1167,7 +1167,7 @@ func (p *Plugin) handleResolveNickname(args map[string]interface{}) (interface{}
 	if err != nil {
 		return nil, err
 	}
-	raw, _ := v.(string)
+	raw, _ := rawString(v)
 	return filterFriendList(raw, keyword)
 }
 
@@ -1944,11 +1944,23 @@ func (p *Plugin) napcat(action string, params map[string]interface{}) (interface
 	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
 		return nil, fmt.Errorf("napcat decode %s: %w", action, err)
 	}
-	return string(raw), nil
+	return raw, nil
 }
 
 // ======== Helpers ========
 
+// rawString extracts a string from napcat's return type (json.RawMessage or string).
+func rawString(v interface{}) (string, bool) {
+	switch r := v.(type) {
+	case string:
+		return r, true
+	case json.RawMessage:
+		return string(r), true
+	case []byte:
+		return string(r), true
+	}
+	return "", false
+}
 
 var reAPIKey = regexp.MustCompile(`(?i)(api[_-]?key|token|secret|password)\s*[=:]\s*\S+`)
 var reSKKey = regexp.MustCompile(`sk-[a-zA-Z0-9]{20,}`)
