@@ -1,7 +1,11 @@
 package main
 
 import (
+	"archive/tar"
+	"compress/gzip"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -33,6 +37,7 @@ func sdkVersionDir(version string) string {
 }
 
 const sdkRepoURL = "https://gitcode.com/JianFeeeee/homeagent-sdk.git"
+const sdkDownloadURL = "https://gitcode.com/JianFeeeee/homeagent-sdk/-/archive/%s/homeagent-sdk-%s.tar.gz"
 
 func cmdSDK(args []string) {
 	if len(args) < 1 {
@@ -125,7 +130,7 @@ func cmdSDKList() {
 	}
 }
 
-// cmdSDKInstall downloads and installs an SDK version.
+// cmdSDKInstall downloads and installs an SDK version from Release archive.
 func cmdSDKInstall(version string) {
 	store := sdkStore()
 	if err := os.MkdirAll(store, 0755); err != nil {
@@ -149,24 +154,91 @@ func cmdSDKInstall(version string) {
 		return
 	}
 
-	fmt.Printf("Downloading SDK version %s...\n", version)
+	url := fmt.Sprintf(sdkDownloadURL, version, version)
+	fmt.Printf("Downloading SDK %s from Release archive...\n", version)
 
-	tmpDir, err := os.MkdirTemp("", "homeagent-sdk-*")
+	tmpFile, err := os.CreateTemp("", "homeagent-sdk-*.tar.gz")
+	if err != nil {
+		fmt.Printf("error: create temp file: %v\n", err)
+		os.Exit(1)
+	}
+	tmpPath := tmpFile.Name()
+	defer os.Remove(tmpPath)
+
+	resp, err := http.Get(url)
+	if err != nil {
+		fmt.Printf("error: download SDK %s: %v\n", version, err)
+		os.Exit(1)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		fmt.Printf("error: download SDK %s: HTTP %d\n", version, resp.StatusCode)
+		os.Exit(1)
+	}
+
+	if _, err := io.Copy(tmpFile, resp.Body); err != nil {
+		fmt.Printf("error: save SDK archive: %v\n", err)
+		os.Exit(1)
+	}
+	tmpFile.Close()
+
+	// Extract to temp dir, then rename to dest
+	tmpDir, err := os.MkdirTemp("", "homeagent-sdk-extract-*")
 	if err != nil {
 		fmt.Printf("error: create temp dir: %v\n", err)
 		os.Exit(1)
 	}
 	defer os.RemoveAll(tmpDir)
 
-	cloneArgs := []string{"clone", "--depth", "1", "--branch", version, sdkRepoURL, tmpDir}
-	cmd := exec.Command("git", cloneArgs...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		fmt.Printf("error: failed to clone SDK version %s: %v\n", version, err)
-		fmt.Println("Make sure git is installed and the version tag exists.")
+	gzr, err := gzip.NewReader(openFile(tmpPath))
+	if err != nil {
+		fmt.Printf("error: read archive: %v\n", err)
 		os.Exit(1)
 	}
+	defer gzr.Close()
+
+	tr := tar.NewReader(gzr)
+	for {
+		header, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			fmt.Printf("error: extract archive: %v\n", err)
+			os.Exit(1)
+		}
+
+		// Strip top-level directory from archive path
+		parts := strings.SplitN(header.Name, "/", 2)
+		if len(parts) < 2 {
+			continue
+		}
+		relPath := parts[1]
+		if relPath == "" {
+			continue
+		}
+		target := filepath.Join(tmpDir, relPath)
+
+		switch header.Typeflag {
+		case tar.TypeDir:
+			os.MkdirAll(target, os.FileMode(header.Mode))
+		case tar.TypeReg:
+			os.MkdirAll(filepath.Dir(target), 0755)
+			f, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY, os.FileMode(header.Mode))
+			if err != nil {
+				fmt.Printf("error: create file %s: %v\n", target, err)
+				os.Exit(1)
+			}
+			if _, err := io.Copy(f, tr); err != nil {
+				f.Close()
+				fmt.Printf("error: write file %s: %v\n", target, err)
+				os.Exit(1)
+			}
+			f.Close()
+		}
+	}
+	gzr.Close()
 
 	if err := os.Rename(tmpDir, dest); err != nil {
 		fmt.Printf("error: move SDK to store: %v\n", err)
@@ -179,6 +251,14 @@ func cmdSDKInstall(version string) {
 	if resolveCurrentVersion(store) == "" {
 		setCurrentVersion(store, version)
 	}
+}
+
+func openFile(path string) *os.File {
+	f, err := os.Open(path)
+	if err != nil {
+		panic(err)
+	}
+	return f
 }
 
 // cmdSDKUse switches the active SDK version.
