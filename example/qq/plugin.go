@@ -1535,15 +1535,19 @@ func (p *Plugin) processMessageSegments(segments []interface{}) string {
 				parts = append(parts, "[表情]")
 			}
 		case "file":
-			fid, _ := data["file"].(string)
+			fid, _ := data["file_id"].(string)
+			if fid == "" {
+				fid, _ = data["file"].(string)
+			}
 			name, _ := data["name"].(string)
+			fileURL, _ := data["url"].(string)
 			size, _ := data["size"].(string)
 			sizeDesc := ""
 			if s, err := strconv.ParseInt(size, 10, 64); err == nil && s > 0 {
 				sizeDesc = fmt.Sprintf(" (%.1f MB)", float64(s)/1048576)
 			}
-			if fid != "" {
-				dlQueue = append(dlQueue, dlItem{fileID: fid, name: name})
+			if fid != "" || fileURL != "" {
+				dlQueue = append(dlQueue, dlItem{fileID: fid, name: name, url: fileURL})
 			}
 			if name != "" {
 				parts = append(parts, fmt.Sprintf("[文件:%s%s]", name, sizeDesc))
