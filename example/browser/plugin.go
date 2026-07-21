@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -12,21 +14,122 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 	"unicode"
 
-	"gitcode.com/JianFeeeee/homeagent-sdk/sdk"
+	sdk "gitcode.com/JianFeeeee/homeagent-sdk/sdk"
+
+	"github.com/chromedp/chromedp"
 )
 
 type Plugin struct {
-	name       string
-	sdk        *sdk.PluginSDK
-	mu         sync.RWMutex
-	timeout    int
-	proxy      string
-	client     *http.Client
+	name    string
+	sdk     *sdk.PluginSDK
+	mu      sync.RWMutex
+	timeout int
+	proxy   string
+	dataDir string
+	client  *http.Client
+
+	sessions map[string]*BrowserSession
+	nextID   int
+	wg       sync.WaitGroup
+	stopCh   chan struct{}
+}
+
+type BrowserSession struct {
+	id        string
+	allocCtx  context.Context
+	cancel    context.CancelFunc
+	ctx       context.Context
+	createdAt time.Time
+	timeout   time.Duration
+	closed    bool
+	mu        sync.Mutex
+	currentURL string
+}
+
+func NewPlugin(name string, config map[string]interface{}) (sdk.Plugin, error) {
+	return &Plugin{name: name, stopCh: make(chan struct{}), sessions: make(map[string]*BrowserSession)}, nil
+}
+
+func (p *Plugin) Name() string { return p.name }
+
+func readCfg[T string | int64 | float64](s sdk.SettingsAPI, key string, fallback T) T {
+	v, err := s.Get(key)
+	if err == nil && v != nil {
+		if s, ok := v.(string); ok && s != "" {
+			switch any(fallback).(type) {
+			case string:
+				return any(s).(T)
+			case int64:
+				if n, err := strconv.ParseInt(s, 10, 64); err == nil {
+					return any(n).(T)
+				}
+			case float64:
+				if n, err := strconv.ParseFloat(s, 64); err == nil {
+					return any(n).(T)
+				}
+			}
+		}
+	}
+	v2, err2 := s.GetCore("plugin." + "browser" + "." + key)
+	if err2 == nil && v2 != nil {
+		if s, ok := v2.(string); ok && s != "" {
+			switch any(fallback).(type) {
+			case string:
+				return any(s).(T)
+			case int64:
+				if n, err := strconv.ParseInt(s, 10, 64); err == nil {
+					return any(n).(T)
+				}
+			case float64:
+				if n, err := strconv.ParseFloat(s, 64); err == nil {
+					return any(n).(T)
+				}
+			}
+		}
+	}
+	return fallback
+}
+
+func readArg[T string | int64 | float64](args map[string]interface{}, key string, fallback T) T {
+	v, ok := args[key]
+	if !ok || v == nil {
+		return fallback
+	}
+	switch any(fallback).(type) {
+	case string:
+		if s, ok := v.(string); ok {
+			return any(s).(T)
+		}
+	case int64:
+		switch val := v.(type) {
+		case float64:
+			return any(int64(val)).(T)
+		case string:
+			if n, err := strconv.ParseInt(val, 10, 64); err == nil {
+				return any(n).(T)
+			}
+		}
+	case float64:
+		switch val := v.(type) {
+		case float64:
+			return any(val).(T)
+		case string:
+			if n, err := strconv.ParseFloat(val, 64); err == nil {
+				return any(n).(T)
+			}
+		}
+	}
+	return fallback
+}
+
+func errResult(msg string) map[string]interface{} {
+	return map[string]interface{}{"isError": true, "content": msg}
 }
 
 func newHTTPClient(timeout int, proxyURL string) *http.Client {
@@ -39,8 +142,7 @@ func newHTTPClient(timeout int, proxyURL string) *http.Client {
 		ResponseHeaderTimeout: time.Duration(timeout) * time.Second,
 	}
 	if proxyURL != "" {
-		u, err := url.Parse(proxyURL)
-		if err == nil {
+		if u, err := url.Parse(proxyURL); err == nil {
 			transport.Proxy = http.ProxyURL(u)
 		}
 	}
@@ -54,104 +156,217 @@ func newHTTPClient(timeout int, proxyURL string) *http.Client {
 			return nil
 		},
 	}
+
 }
 
-func (p *Plugin) Name() string { return p.name }
+// ── Start / Stop ──────────────────────────────────────────
 
 func (p *Plugin) Start(s *sdk.PluginSDK) error {
-	s.SetAutoRestart(true)
 	p.sdk = s
+	s.SetAutoRestart(true)
 
 	s.Settings().RegisterDef(sdk.ConfigDef{
-		Key: "plugin.browser.timeout", Default: "30", Type: "int",
+		Key: "timeout", Default: "30", Type: "int",
 		DisplayName: "HTTP 超时(秒)", Description: "HTTP 请求超时时间",
 		Category: "browser",
 	})
 	s.Settings().RegisterDef(sdk.ConfigDef{
-		Key: "plugin.browser.proxy", Default: "", Type: "string",
-		DisplayName: "HTTP 代理", Description: "HTTP 代理地址，如 http://proxy:port。为空则不使用代理",
+		Key: "proxy", Default: "", Type: "string",
+		DisplayName: "HTTP 代理", Description: "HTTP 代理地址，如 http://proxy:port",
 		Category: "browser",
 	})
-	t := getSetting[float64](s.Settings(), "timeout", 30)
-	p.timeout = int(t)
-	if p.timeout < 5 { p.timeout = 5 }
-	if p.timeout > 120 { p.timeout = 120 }
+	s.Settings().RegisterDef(sdk.ConfigDef{
+		Key: "data_dir", Default: "", Type: "string",
+		DisplayName: "浏览器数据目录", Description: "Chromium 用户数据目录路径（持久化 cookies/登录状态）。留空则每次启动临时目录。",
+		Category: "browser",
+	})
 
-	p.proxy = getSetting[string](s.Settings(), "proxy", "")
+	t := readCfg(s.Settings(), "timeout", float64(30))
+	p.timeout = int(t)
+	if p.timeout < 5 {
+		p.timeout = 5
+	}
+	if p.timeout > 120 {
+		p.timeout = 120
+	}
+	p.proxy = readCfg(s.Settings(), "proxy", "")
+	p.dataDir = readCfg(s.Settings(), "data_dir", "")
+	if p.dataDir != "" {
+		os.MkdirAll(p.dataDir, 0700)
+	}
 	p.client = newHTTPClient(p.timeout, p.proxy)
 
 	tp := p.name + "_"
 
 	s.RegisterTool(tp+"search", sdk.ToolDef{
-		Name: tp + "search",
-		Description: "Search the web for current information using DuckDuckGo. Returns formatted results with titles, URLs, and snippets.",
+		Name:        tp + "search",
+		Description: "使用 Bing 搜索网页。返回标题、URL 和摘要。",
 		Parameters: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
-				"query": map[string]interface{}{"type": "string", "description": "Search query"},
-				"count": map[string]interface{}{"type": "integer", "description": "Number of results (1-20, default 5)"},
+				"query": map[string]interface{}{"type": "string", "description": "搜索关键词"},
+				"count": map[string]interface{}{"type": "integer", "description": "结果数量(1-20，默认5)"},
 			},
 			"required": []string{"query"},
 		},
 	}, p.handleSearch)
 
 	s.RegisterTool(tp+"fetch", sdk.ToolDef{
-		Name: tp + "fetch",
-		Description: "Fetch a URL and extract readable content as markdown-like text. Blocked on private/internal IPs.",
+		Name:        tp + "fetch",
+		Description: "快速抓取 URL 内容(quick 模式)。纯 HTTP 请求，不支持 JS 渲染，有 SSRF 防护。",
 		Parameters: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
-				"url":       map[string]interface{}{"type": "string", "description": "HTTP/HTTPS URL to fetch"},
-				"max_chars": map[string]interface{}{"type": "integer", "description": "Max characters to return (default 20000)"},
+				"url":       map[string]interface{}{"type": "string", "description": "HTTP/HTTPS URL"},
+				"max_chars": map[string]interface{}{"type": "integer", "description": "最大返回字符数(默认20000)"},
 			},
 			"required": []string{"url"},
 		},
 	}, p.handleFetch)
 
 	s.RegisterTool(tp+"render", sdk.ToolDef{
-		Name: tp + "render",
-		Description: "Render a web page using headless Chromium browser and extract the text content. Supports JavaScript-rendered pages. Returns title and first 5000 characters.",
+		Name:        tp + "render",
+		Description: "无头 Chromium 渲染网页并提取文本(normal 模式)。支持 JS 渲染的页面。",
 		Parameters: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
-				"url":  map[string]interface{}{"type": "string", "description": "URL to render"},
-				"wait": map[string]interface{}{"type": "integer", "description": "Seconds to wait for JS rendering (default 0)"},
+				"url":  map[string]interface{}{"type": "string", "description": "URL"},
+				"wait": map[string]interface{}{"type": "integer", "description": "等待 JS 渲染的秒数(默认0)"},
 			},
 			"required": []string{"url"},
 		},
 	}, p.handleRender)
+
+	s.RegisterTool(tp+"start", sdk.ToolDef{
+		Name:        tp + "start",
+		Description: "启动交互式浏览器会话(interactive 模式)。通过 CDP 连接 Chromium，支持导航、截图、点击、输入等操作。返回会话 ID。",
+		Parameters: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"url":     map[string]interface{}{"type": "string", "description": "初始导航 URL（可选）"},
+				"timeout": map[string]interface{}{"type": "string", "description": "会话超时(如 5m, 10m，默认 10m)"},
+			},
+		},
+	}, p.handleBrowserStart)
+
+	s.RegisterTool(tp+"navigate", sdk.ToolDef{
+		Name:        tp + "navigate",
+		Description: "在交互式浏览器中导航到指定 URL。自动等待页面 body 加载完成。",
+		Parameters: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"id":   map[string]interface{}{"type": "string", "description": "浏览器会话 ID"},
+				"url":  map[string]interface{}{"type": "string", "description": "目标 URL"},
+				"wait": map[string]interface{}{"type": "integer", "description": "页面加载后额外等待秒数(默认2，反爬页面建议5)"},
+			},
+			"required": []string{"id", "url"},
+		},
+	}, p.handleNavigate)
+
+	s.RegisterTool(tp+"screenshot", sdk.ToolDef{
+		Name:        tp + "screenshot",
+		Description: "对交互式浏览器当前页面截图。返回 base64 编码的 PNG 图片。",
+		Parameters: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"id":     map[string]interface{}{"type": "string", "description": "浏览器会话 ID"},
+				"full":   map[string]interface{}{"type": "boolean", "description": "是否全页截图(默认 false，仅视口)"},
+				"format": map[string]interface{}{"type": "string", "description": "图片格式: png 或 jpeg(默认 png)"},
+			},
+			"required": []string{"id"},
+		},
+	}, p.handleScreenshot)
+
+	s.RegisterTool(tp+"html", sdk.ToolDef{
+		Name:        tp + "html",
+		Description: "获取交互式浏览器当前页面 JS 渲染后的完整 HTML。用于模型分析页面结构、定位元素。",
+		Parameters: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"id":        map[string]interface{}{"type": "string", "description": "浏览器会话 ID"},
+				"max_chars": map[string]interface{}{"type": "integer", "description": "最大返回字符数(默认50000)"},
+			},
+			"required": []string{"id"},
+		},
+	}, p.handleHTML)
+
+	s.RegisterTool(tp+"click", sdk.ToolDef{
+		Name:        tp + "click",
+		Description: "在交互式浏览器中点击元素。自动等待元素可见后再点击。",
+		Parameters: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"id":       map[string]interface{}{"type": "string", "description": "浏览器会话 ID"},
+				"selector": map[string]interface{}{"type": "string", "description": "CSS 选择器"},
+				"wait":     map[string]interface{}{"type": "integer", "description": "等待元素出现的超时毫秒数(默认3000)"},
+			},
+			"required": []string{"id", "selector"},
+		},
+	}, p.handleClick)
+
+	s.RegisterTool(tp+"type", sdk.ToolDef{
+		Name:        tp + "type",
+		Description: "在交互式浏览器中向输入框输入文字。自动等待元素可见、聚焦后清空再输入。",
+		Parameters: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"id":       map[string]interface{}{"type": "string", "description": "浏览器会话 ID"},
+				"selector": map[string]interface{}{"type": "string", "description": "CSS 选择器"},
+				"text":     map[string]interface{}{"type": "string", "description": "要输入的文字"},
+				"submit":   map[string]interface{}{"type": "boolean", "description": "输入后按回车(默认 false)"},
+				"wait":     map[string]interface{}{"type": "integer", "description": "等待元素出现的超时毫秒数(默认3000)"},
+			},
+			"required": []string{"id", "selector", "text"},
+		},
+	}, p.handleType)
+
+	s.RegisterTool(tp+"scroll", sdk.ToolDef{
+		Name:        tp + "scroll",
+		Description: "在交互式浏览器中滚动页面。",
+		Parameters: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"id":     map[string]interface{}{"type": "string", "description": "浏览器会话 ID"},
+				"dir":    map[string]interface{}{"type": "string", "description": "方向: up, down, left, right(默认 down)"},
+				"amount": map[string]interface{}{"type": "integer", "description": "滚动像素数(默认 500)"},
+			},
+			"required": []string{"id"},
+		},
+	}, p.handleScroll)
+
+	s.RegisterTool(tp+"close", sdk.ToolDef{
+		Name:        tp + "close",
+		Description: "关闭交互式浏览器会话，释放资源。",
+		Parameters: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"id": map[string]interface{}{"type": "string", "description": "浏览器会话 ID"},
+			},
+			"required": []string{"id"},
+		},
+	}, p.handleBrowserClose)
+
+	p.wg.Add(1)
+	go p.cleanupLoop()
 
 	log.Printf("[%s] started, timeout=%ds proxy=%q", p.name, p.timeout, p.proxy)
 	return nil
 }
 
 func (p *Plugin) Stop() error {
+	close(p.stopCh)
+	p.wg.Wait()
 	if p.client != nil {
 		p.client.CloseIdleConnections()
 	}
+	p.mu.Lock()
+	for _, s := range p.sessions {
+		s.Close()
+	}
+	p.sessions = nil
+	p.mu.Unlock()
 	log.Printf("[%s] stopped", p.name)
 	return nil
-}
-
-func getSetting[T any](s sdk.SettingsAPI, key string, def T) T {
-	v, err := s.Get(key)
-	if err != nil || v == nil { return def }
-	val, ok := v.(T)
-	if !ok { return def }
-	return val
-}
-
-func convInt64(v interface{}) (int64, error) {
-	switch x := v.(type) {
-	case float64: return int64(x), nil
-	case int64: return x, nil
-	case json.Number: return x.Int64()
-	default: return 0, fmt.Errorf("cannot convert %T to int64", v)
-	}
-}
-
-func errorResult(msg string) map[string]interface{} {
-	return map[string]interface{}{"isError": true, "content": msg}
 }
 
 // ── SSRF ──────────────────────────────────────────────────
@@ -165,25 +380,33 @@ func init() {
 		"::1/128", "fc00::/7", "fe80::/10",
 	} {
 		_, n, _ := net.ParseCIDR(c)
-		if n != nil { privateCIDRs = append(privateCIDRs, n) }
+		if n != nil {
+			privateCIDRs = append(privateCIDRs, n)
+		}
 	}
 }
 
 func isPrivateIP(ip net.IP) bool {
 	for _, n := range privateCIDRs {
-		if n.Contains(ip) { return true }
+		if n.Contains(ip) {
+			return true
+		}
 	}
 	return false
 }
 
 func (p *Plugin) ssrfCheck(rawURL string) error {
 	u, err := url.Parse(rawURL)
-	if err != nil { return fmt.Errorf("invalid URL: %w", err) }
+	if err != nil {
+		return fmt.Errorf("invalid URL: %w", err)
+	}
 	if u.Scheme != "http" && u.Scheme != "https" {
-		return fmt.Errorf("only http/https URLs allowed, got: %s", u.Scheme)
+		return fmt.Errorf("only http/https allowed, got: %s", u.Scheme)
 	}
 	ips, err := net.LookupHost(u.Hostname())
-	if err != nil { return fmt.Errorf("DNS lookup failed: %w", err) }
+	if err != nil {
+		return fmt.Errorf("DNS lookup failed: %w", err)
+	}
 	for _, ip := range ips {
 		if parsed := net.ParseIP(ip); parsed != nil && isPrivateIP(parsed) {
 			return fmt.Errorf("blocked request to private IP: %s (%s)", u.Hostname(), ip)
@@ -192,95 +415,77 @@ func (p *Plugin) ssrfCheck(rawURL string) error {
 	return nil
 }
 
-// ── DuckDuckGo Search ─────────────────────────────────────
+// ── Bing Search ───────────────────────────────────────────
 
-type ddgResult struct {
+type searchResult struct {
 	Title, URL, Snippet string
 }
 
-func (p *Plugin) ddgSearch(query string, count int) ([]ddgResult, error) {
-	form := url.Values{"q": {query}}
-	req, _ := http.NewRequest("POST", "https://html.duckduckgo.com/html/", strings.NewReader(form.Encode()))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+func (p *Plugin) bingSearch(query string, count int) ([]searchResult, error) {
+	u := fmt.Sprintf("https://www.bing.com/search?q=%s&count=%d", url.QueryEscape(query), count)
+	req, _ := http.NewRequest("GET", u, nil)
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+	req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
 	resp, err := p.client.Do(req)
-	if err != nil { return nil, fmt.Errorf("request failed: %w", err) }
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %w", err)
+	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
-	return parseDDGResults(string(body), count), nil
+	return parseBingResults(string(body), count), nil
 }
 
-func parseDDGResults(html string, count int) []ddgResult {
-	var results []ddgResult
-	marker := `result__body"`
-	for i := 0; i < len(html); i++ {
-		idx := strings.Index(html[i:], marker)
-		if idx < 0 { break }
-		i += idx
-		closeIdx := findClosingTag(html, i, "</div>")
-		if closeIdx < 0 { break }
-		if r := parseSingleDDGResult(html[i : closeIdx+6]); r.URL != "" {
-			results = append(results, r)
-			if len(results) >= count { break }
+func parseBingResults(html string, count int) []searchResult {
+	var results []searchResult
+	re := regexp.MustCompile(`<li class="b_algo"(?s)(.*?)</li>`)
+	matches := re.FindAllStringSubmatch(html, -1)
+	for _, m := range matches {
+		if len(results) >= count {
+			break
 		}
-		i = closeIdx + 6
+		block := m[1]
+		var r searchResult
+		hrefRe := regexp.MustCompile(`<a[^>]+href="([^"]+)"[^>]*>`)
+		if hm := hrefRe.FindStringSubmatch(block); len(hm) > 1 {
+			r.URL = hm[1]
+		}
+		titleRe := regexp.MustCompile(`<a[^>]+href="[^"]+"[^>]*>(.*?)</a>`)
+		if tm := titleRe.FindStringSubmatch(block); len(tm) > 1 {
+			r.Title = stripTags(tm[1])
+		}
+		snipRe := regexp.MustCompile(`<div class="b_caption">.*?<p>(.*?)</p>`)
+		if sm := snipRe.FindStringSubmatch(block); len(sm) > 1 {
+			r.Snippet = stripTags(sm[1])
+		}
+		if r.URL != "" && r.Title != "" {
+			results = append(results, r)
+		}
 	}
 	return results
 }
 
-func findClosingTag(s string, start int, tag string) int {
-	depth := 1
-	for pos := start; pos < len(s); {
-		nextOpen := strings.Index(s[pos:], `<div`)
-		nextClose := strings.Index(s[pos:], tag)
-		if nextClose < 0 { return -1 }
-		if nextOpen >= 0 && nextOpen < nextClose {
-			depth++
-			pos += nextOpen + 4
-		} else {
-			depth--
-			if depth == 0 { return pos + nextClose }
-			pos += nextClose + len(tag)
-		}
-	}
-	return -1
-}
-
-func parseSingleDDGResult(block string) ddgResult {
-	var r ddgResult
-	urlMarker := `class="result__a" href="`
-	if uIdx := strings.Index(block, urlMarker); uIdx >= 0 {
-		start := uIdx + len(urlMarker)
-		if end := strings.Index(block[start:], `"`); end >= 0 {
-			r.URL = block[start : start+end]
-		}
-	}
-	for _, marker := range []string{`<a class="result__snippet`, `<div class="result__snippet`} {
-		if sIdx := strings.Index(block, marker); sIdx >= 0 {
-			if aStart := strings.Index(block[sIdx:], `>`); aStart >= 0 {
-				snipStart := sIdx + aStart + 1
-				snipEnd := strings.Index(block[snipStart:], `</a>`)
-				if snipEnd < 0 { snipEnd = strings.Index(block[snipStart:], `</div>`) }
-				if snipEnd >= 0 { r.Snippet = stripTags(block[snipStart : snipStart+snipEnd]) }
-			}
-			break
-		}
-	}
-	return r
-}
-
 func (p *Plugin) handleSearch(args map[string]interface{}) (interface{}, error) {
-	query, _ := args["query"].(string)
-	if query == "" { return errorResult("query is required"), nil }
+	query := readArg(args, "query", "")
+	if query == "" {
+		return errResult("query is required"), nil
+	}
 	count := 5
-	if v, ok := args["count"].(float64); ok && v > 0 { count = int(v) }
-	if count < 1 { count = 1 }
-	if count > 20 { count = 20 }
-
-	results, err := p.ddgSearch(query, count)
-	if err != nil { return errorResult("search failed: " + err.Error()), nil }
-	if len(results) == 0 { return map[string]interface{}{"content": "No results found."}, nil }
-
+	if v, ok := args["count"].(float64); ok && v > 0 {
+		count = int(v)
+	}
+	if count < 1 {
+		count = 1
+	}
+	if count > 20 {
+		count = 20
+	}
+	results, err := p.bingSearch(query, count)
+	if err != nil {
+		return errResult("search failed: " + err.Error()), nil
+	}
+	if len(results) == 0 {
+		return map[string]interface{}{"content": "No results found."}, nil
+	}
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("Search results for %q:\n\n", query))
 	for i, r := range results {
@@ -289,16 +494,20 @@ func (p *Plugin) handleSearch(args map[string]interface{}) (interface{}, error) 
 	return map[string]interface{}{"content": strings.TrimSpace(sb.String())}, nil
 }
 
-// ── Web Fetch ─────────────────────────────────────────────
+// ── Web Fetch (quick) ──────────────────────────────────────
 
 func htmlToText(html string) string {
 	for _, tag := range []string{"<script", "<style"} {
 		closing := "</" + tag[1:] + ">"
 		for {
 			start := strings.Index(strings.ToLower(html), tag)
-			if start < 0 { break }
+			if start < 0 {
+				break
+			}
 			end := strings.Index(html[start:], closing)
-			if end < 0 { break }
+			if end < 0 {
+				break
+			}
 			html = html[:start] + html[start+end+len(closing):]
 		}
 	}
@@ -312,19 +521,26 @@ func htmlToText(html string) string {
 	} {
 		html = strings.ReplaceAll(html, pair[0], pair[1])
 	}
-
 	lines := strings.Split(html, "\n")
 	var cleaned []string
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
-		if line == "" { continue }
+		if line == "" {
+			continue
+		}
 		in := []rune(line)
 		var out []rune
 		space := false
 		for _, r := range in {
 			if unicode.IsSpace(r) {
-				if !space { out = append(out, ' '); space = true }
-			} else { out = append(out, r); space = false }
+				if !space {
+					out = append(out, ' ')
+					space = true
+				}
+			} else {
+				out = append(out, r)
+				space = false
+			}
 		}
 		cleaned = append(cleaned, string(out))
 	}
@@ -335,63 +551,89 @@ func stripTags(s string) string {
 	var out strings.Builder
 	inTag := false
 	for _, r := range s {
-		if r == '<' { inTag = true; continue }
-		if r == '>' { inTag = false; continue }
-		if !inTag { out.WriteRune(r) }
+		if r == '<' {
+			inTag = true
+			continue
+		}
+		if r == '>' {
+			inTag = false
+			continue
+		}
+		if !inTag {
+			out.WriteRune(r)
+		}
 	}
 	return out.String()
 }
 
 func (p *Plugin) handleFetch(args map[string]interface{}) (interface{}, error) {
-	rawURL, _ := args["url"].(string)
-	if rawURL == "" { return errorResult("url is required"), nil }
+	rawURL := readArg(args, "url", "")
+	if rawURL == "" {
+		return errResult("url is required"), nil
+	}
 	maxChars := 20000
-	if v, ok := args["max_chars"].(float64); ok && v > 0 { maxChars = int(v) }
-	if maxChars > 500000 { maxChars = 500000 }
-	if err := p.ssrfCheck(rawURL); err != nil { return errorResult(err.Error()), nil }
-
+	if v, ok := args["max_chars"].(float64); ok && v > 0 {
+		maxChars = int(v)
+	}
+	if maxChars > 500000 {
+		maxChars = 500000
+	}
+	if err := p.ssrfCheck(rawURL); err != nil {
+		return errResult(err.Error()), nil
+	}
 	req, _ := http.NewRequest("GET", rawURL, nil)
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
 	resp, err := p.client.Do(req)
-	if err != nil { return errorResult("fetch failed: " + err.Error()), nil }
+	if err != nil {
+		return errResult("fetch failed: " + err.Error()), nil
+	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 400 {
-		return errorResult(fmt.Sprintf("HTTP %d: %s", resp.StatusCode, resp.Status)), nil
+		return errResult(fmt.Sprintf("HTTP %d: %s", resp.StatusCode, resp.Status)), nil
 	}
-
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, int64(maxChars)+50000))
 	rawText := string(body)
 	ct := resp.Header.Get("Content-Type")
-
 	var extracted string
 	if strings.Contains(ct, "text/html") {
 		extracted = htmlToText(rawText)
 	} else if strings.Contains(ct, "application/json") {
 		var v interface{}
 		if json.Unmarshal(body, &v) == nil {
-			if pretty, err := json.MarshalIndent(v, "", "  "); err == nil { extracted = string(pretty) }
+			if pretty, err := json.MarshalIndent(v, "", "  "); err == nil {
+				extracted = string(pretty)
+			}
 		}
-		if extracted == "" { extracted = rawText }
-	} else { extracted = rawText }
-
+		if extracted == "" {
+			extracted = rawText
+		}
+	} else {
+		extracted = rawText
+	}
 	extracted = strings.TrimSpace(extracted)
-	if len(extracted) > maxChars { extracted = extracted[:maxChars] + "\n\n[Content truncated]" }
-	if extracted == "" { extracted = "(empty content)" }
-
+	if len(extracted) > maxChars {
+		extracted = extracted[:maxChars] + "\n\n[Content truncated]"
+	}
+	if extracted == "" {
+		extracted = "(empty content)"
+	}
 	return map[string]interface{}{
 		"content": extracted,
 		"details": map[string]interface{}{"url": rawURL, "status": resp.StatusCode, "content_type": ct},
 	}, nil
 }
 
-// ── Chromium Render ───────────────────────────────────────
+// ── Chromium Render (normal) ──────────────────────────────
 
 func (p *Plugin) handleRender(args map[string]interface{}) (interface{}, error) {
-	rawURL, _ := args["url"].(string)
-	if rawURL == "" { return nil, fmt.Errorf("url is required") }
-	waitSec, _ := convInt64(args["wait"])
-	if waitSec > 0 { time.Sleep(time.Duration(waitSec) * time.Second) }
-
+	rawURL := readArg(args, "url", "")
+	if rawURL == "" {
+		return errResult("url is required"), nil
+	}
+	waitSec := int64(readArg(args, "wait", float64(0)))
+	if waitSec > 0 {
+		time.Sleep(time.Duration(waitSec) * time.Second)
+	}
 	var html string
 	chromiumPath := "/usr/local/bin/chromium"
 	if _, err := os.Stat(chromiumPath); err == nil {
@@ -399,49 +641,341 @@ func (p *Plugin) handleRender(args map[string]interface{}) (interface{}, error) 
 		cmd := exec.Command(chromiumPath, "--headless", "--disable-gpu", "--no-sandbox", "--dump-dom", rawURL)
 		cmd.Stdout = &out
 		if err := cmd.Run(); err != nil {
-			return nil, fmt.Errorf("chromium: %w", err)
+			return errResult("chromium: " + err.Error()), nil
 		}
 		html = out.String()
 	} else {
 		resp, err := http.Get(rawURL)
-		if err != nil { return nil, fmt.Errorf("http get: %w", err) }
+		if err != nil {
+			return errResult("http get: " + err.Error()), nil
+		}
 		defer resp.Body.Close()
-		body, err := io.ReadAll(resp.Body)
-		if err != nil { return nil, fmt.Errorf("read body: %w", err) }
+		body, _ := io.ReadAll(resp.Body)
 		html = string(body)
 	}
-
 	title := ""
 	if m := regexp.MustCompile(`<title>([^<]+)</title>`).FindStringSubmatch(html); len(m) > 1 {
 		title = m[1]
 	}
-
-	var textOut bytes.Buffer
-	pyCmd := exec.Command("python3", "-c", `
-import sys, re, html
-raw = sys.stdin.read()
-text = re.sub(r'<[^>]+>', ' ', raw)
-text = re.sub(r'\s+', ' ', text).strip()
-text = html.unescape(text)
-sys.stdout.write(text)
-`)
-	pyCmd.Stdin = strings.NewReader(html)
-	pyCmd.Stdout = &textOut
-	pyCmd.Run()
-	text := strings.TrimSpace(textOut.String())
-
+	text := htmlToText(html)
 	origLen := len(text)
 	truncated := origLen > 5000
-	if truncated { text = text[:5000] }
-
+	if truncated {
+		text = text[:5000]
+	}
 	result := ""
-	if title != "" { result = fmt.Sprintf("标题: %s\nURL: %s\n\n", title, rawURL) }
+	if title != "" {
+		result = fmt.Sprintf("标题: %s\nURL: %s\n\n", title, rawURL)
+	}
 	result += text
-	if truncated { result += fmt.Sprintf("\n\n...（内容过长，仅显示前 5000 字符，共 %d 字符）", origLen) }
-
+	if truncated {
+		result += fmt.Sprintf("\n\n...(仅显示前 5000 字符，共 %d 字符)", origLen)
+	}
 	return map[string]interface{}{"content": result, "title": title}, nil
 }
 
-func NewPlugin(name string, config map[string]interface{}) (sdk.Plugin, error) {
-	return &Plugin{name: name}, nil
+// ── Interactive Browser Session (CDP) ─────────────────────
+
+func (p *Plugin) handleBrowserStart(args map[string]interface{}) (interface{}, error) {
+	timeoutStr := readArg(args, "timeout", "10m")
+	timeout, err := time.ParseDuration(timeoutStr)
+	if err != nil {
+		timeout = 10 * time.Minute
+	}
+
+	opts := append(chromedp.DefaultExecAllocatorOptions[:],
+		chromedp.Flag("headless", true),
+		chromedp.Flag("disable-gpu", true),
+		chromedp.Flag("no-sandbox", true),
+		chromedp.WindowSize(1280, 800),
+	)
+	if p.dataDir != "" {
+		opts = append(opts, chromedp.Flag("user-data-dir", p.dataDir))
+	}
+	if p.proxy != "" {
+		opts = append(opts, chromedp.Flag("proxy-server", p.proxy))
+	}
+
+	allocCtx, cancel := chromedp.NewExecAllocator(context.Background(), opts...)
+	ctx, _ := chromedp.NewContext(allocCtx)
+
+	session := &BrowserSession{
+		allocCtx:  allocCtx,
+		cancel:    cancel,
+		ctx:       ctx,
+		createdAt: time.Now(),
+		timeout:   timeout,
+	}
+
+	p.mu.Lock()
+	p.nextID++
+	id := fmt.Sprintf("browser_%d", p.nextID)
+	session.id = id
+	p.sessions[id] = session
+	p.mu.Unlock()
+
+	initURL := readArg(args, "url", "")
+	if initURL != "" {
+		if err := chromedp.Run(ctx,
+			chromedp.Navigate(initURL),
+			chromedp.WaitReady("body"),
+		); err != nil {
+			session.Close()
+			p.mu.Lock()
+			delete(p.sessions, id)
+			p.mu.Unlock()
+			return errResult("navigate failed: " + err.Error()), nil
+		}
+		session.currentURL = initURL
+		p.sdk.InjectText(p.name, p.name, fmt.Sprintf("[浏览器 %s 已打开 %s]", id, initURL))
+	}
+
+	log.Printf("[%s] created browser session %s: url=%s timeout=%v", p.name, id, initURL, timeout)
+	return map[string]interface{}{
+		"id":      id,
+		"status":  "created",
+		"url":     initURL,
+		"timeout": timeout.String(),
+	}, nil
+}
+
+func (p *Plugin) getSession(id string) (*BrowserSession, error) {
+	p.mu.Lock()
+	s, ok := p.sessions[id]
+	p.mu.Unlock()
+	if !ok {
+		return nil, fmt.Errorf("浏览器会话 %s 不存在或已关闭", id)
+	}
+	return s, nil
+}
+
+func (p *Plugin) handleNavigate(args map[string]interface{}) (interface{}, error) {
+	id := readArg(args, "id", "")
+	rawURL := readArg(args, "url", "")
+	if id == "" || rawURL == "" {
+		return errResult("id 和 url 不能为空"), nil
+	}
+	s, err := p.getSession(id)
+	if err != nil {
+		return errResult(err.Error()), nil
+	}
+	waitSec := int64(readArg(args, "wait", float64(2)))
+	ctx, cancel := context.WithTimeout(s.ctx, time.Duration(p.timeout+10)*time.Second)
+	defer cancel()
+	if err := chromedp.Run(ctx,
+		chromedp.Navigate(rawURL),
+		chromedp.WaitReady("body"),
+		chromedp.Sleep(time.Duration(waitSec)*time.Second),
+	); err != nil {
+		return errResult("navigate failed: " + err.Error()), nil
+	}
+	s.currentURL = rawURL
+	p.sdk.InjectText(p.name, p.name, fmt.Sprintf("[浏览器 %s 已导航到 %s]", id, rawURL))
+	return map[string]interface{}{"status": "ok", "url": rawURL}, nil
+}
+
+func (p *Plugin) handleScreenshot(args map[string]interface{}) (interface{}, error) {
+	id := readArg(args, "id", "")
+	if id == "" {
+		return errResult("id is required"), nil
+	}
+	s, sessErr := p.getSession(id)
+	if sessErr != nil {
+		return errResult(sessErr.Error()), nil
+	}
+	full := false
+	if v, ok := args["full"].(bool); ok {
+		full = v
+	}
+	format := readArg(args, "format", "png")
+	var buf []byte
+	var err error
+	if full {
+		err = chromedp.Run(s.ctx, chromedp.FullScreenshot(&buf, 90))
+	} else {
+		err = chromedp.Run(s.ctx, chromedp.Screenshot("body", &buf))
+	}
+	if err != nil {
+		return errResult("screenshot failed: " + err.Error()), nil
+	}
+	b64 := base64.StdEncoding.EncodeToString(buf)
+	return map[string]interface{}{
+		"status":    "ok",
+		"format":    format,
+		"size":      len(buf),
+		"base64":    b64,
+		"data_uri":  fmt.Sprintf("data:image/%s;base64,%s", format, b64),
+	}, nil
+}
+
+func (p *Plugin) handleHTML(args map[string]interface{}) (interface{}, error) {
+	id := readArg(args, "id", "")
+	if id == "" {
+		return errResult("id is required"), nil
+	}
+	s, err := p.getSession(id)
+	if err != nil {
+		return errResult(err.Error()), nil
+	}
+	maxChars := 50000
+	if v, ok := args["max_chars"].(float64); ok && v > 0 {
+		maxChars = int(v)
+	}
+	var html string
+	if err := chromedp.Run(s.ctx, chromedp.OuterHTML("html", &html)); err != nil {
+		return errResult("get html failed: " + err.Error()), nil
+	}
+	var title, currentURL string
+	chromedp.Run(s.ctx,
+		chromedp.Title(&title),
+		chromedp.Location(&currentURL),
+	)
+	truncated := len(html) > maxChars
+	if truncated {
+		html = html[:maxChars] + "\n\n[HTML truncated]"
+	}
+	return map[string]interface{}{
+		"status":  "ok",
+		"title":   title,
+		"url":     currentURL,
+		"html":    html,
+		"length":  len(html),
+	}, nil
+}
+
+func (p *Plugin) handleClick(args map[string]interface{}) (interface{}, error) {
+	id := readArg(args, "id", "")
+	selector := readArg(args, "selector", "")
+	if id == "" || selector == "" {
+		return errResult("id 和 selector 不能为空"), nil
+	}
+	s, err := p.getSession(id)
+	if err != nil {
+		return errResult(err.Error()), nil
+	}
+	waitMs := int64(readArg(args, "wait", float64(3000)))
+	ctx, cancel := context.WithTimeout(s.ctx, time.Duration(waitMs)*time.Millisecond)
+	defer cancel()
+	if err := chromedp.Run(ctx,
+		chromedp.WaitVisible(selector),
+		chromedp.Click(selector),
+	); err != nil {
+		return errResult("click failed (element may not exist or page blocking): " + err.Error()), nil
+	}
+	return map[string]interface{}{"status": "ok", "selector": selector}, nil
+}
+
+func (p *Plugin) handleType(args map[string]interface{}) (interface{}, error) {
+	id := readArg(args, "id", "")
+	selector := readArg(args, "selector", "")
+	text := readArg(args, "text", "")
+	if id == "" || selector == "" || text == "" {
+		return errResult("id, selector, text 不能为空"), nil
+	}
+	s, err := p.getSession(id)
+	if err != nil {
+		return errResult(err.Error()), nil
+	}
+	waitMs := int64(readArg(args, "wait", float64(3000)))
+	ctx, cancel := context.WithTimeout(s.ctx, time.Duration(waitMs)*time.Millisecond)
+	defer cancel()
+	actions := []chromedp.Action{
+		chromedp.WaitVisible(selector),
+		chromedp.Click(selector, chromedp.NodeVisible),
+		chromedp.Clear(selector),
+		chromedp.SendKeys(selector, text),
+	}
+	submit := false
+	if v, ok := args["submit"].(bool); ok {
+		submit = v
+	}
+	if submit {
+		actions = append(actions, chromedp.SendKeys(selector, "\r"))
+	}
+	if err := chromedp.Run(ctx, actions...); err != nil {
+		return errResult("type failed (element may not exist or page blocking): " + err.Error()), nil
+	}
+	return map[string]interface{}{"status": "ok", "selector": selector}, nil
+}
+
+func (p *Plugin) handleScroll(args map[string]interface{}) (interface{}, error) {
+	id := readArg(args, "id", "")
+	if id == "" {
+		return errResult("id is required"), nil
+	}
+	s, err := p.getSession(id)
+	if err != nil {
+		return errResult(err.Error()), nil
+	}
+	dir := readArg(args, "dir", "down")
+	amount := readArg(args, "amount", float64(500))
+	var scrollJS string
+	switch dir {
+	case "up":
+		scrollJS = fmt.Sprintf("window.scrollBy(0, -%d)", int(amount))
+	case "down":
+		scrollJS = fmt.Sprintf("window.scrollBy(0, %d)", int(amount))
+	case "left":
+		scrollJS = fmt.Sprintf("window.scrollBy(-%d, 0)", int(amount))
+	case "right":
+		scrollJS = fmt.Sprintf("window.scrollBy(%d, 0)", int(amount))
+	default:
+		return errResult("dir 必须是 up/down/left/right"), nil
+	}
+	if err := chromedp.Run(s.ctx, chromedp.Evaluate(scrollJS, nil)); err != nil {
+		return errResult("scroll failed: " + err.Error()), nil
+	}
+	return map[string]interface{}{"status": "ok", "dir": dir, "amount": amount}, nil
+}
+
+func (p *Plugin) handleBrowserClose(args map[string]interface{}) (interface{}, error) {
+	id := readArg(args, "id", "")
+	if id == "" {
+		return errResult("id is required"), nil
+	}
+	p.mu.Lock()
+	s, ok := p.sessions[id]
+	if ok {
+		delete(p.sessions, id)
+	}
+	p.mu.Unlock()
+	if !ok {
+		return errResult(fmt.Sprintf("浏览器会话 %s 不存在或已关闭", id)), nil
+	}
+	s.Close()
+	log.Printf("[%s] closed browser session %s", p.name, id)
+	return map[string]interface{}{"status": "closed", "id": id}, nil
+}
+
+func (s *BrowserSession) Close() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return
+	}
+	s.closed = true
+	s.cancel()
+}
+
+func (p *Plugin) cleanupLoop() {
+	defer p.wg.Done()
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-p.stopCh:
+			return
+		case <-ticker.C:
+			p.mu.Lock()
+			for id, s := range p.sessions {
+				if time.Since(s.createdAt) >= s.timeout {
+					log.Printf("[%s] cleanup: browser session %s expired", p.name, id)
+					delete(p.sessions, id)
+					go s.Close()
+					p.sdk.InjectText(p.name, p.name, fmt.Sprintf("[浏览器会话 %s 已超时关闭]", id))
+				}
+			}
+			p.mu.Unlock()
+		}
+	}
 }

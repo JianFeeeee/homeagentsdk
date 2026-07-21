@@ -1,11 +1,11 @@
 {
   "name": "browser",
   "name_zh": "浏览器",
-  "name_en": "browser",
-  "version": "1.0.0",
-  "description": "网络资源搜索与获取：搜索引擎查询（browser_search）、网页抓取（browser_fetch，SSRF防护）、无头浏览器渲染（browser_render）",
+  "name_en": "Browser",
+  "version": "2.0.0",
+  "description": "统一浏览器插件：搜索、HTTP抓取(quick)、无头渲染(normal)、交互式浏览器(interactive/CDP)",
   "author": "HomeAgent",
   "entry": "plugin.so",
-  "tags": ["web", "search", "fetch", "browser"],
+  "tags": ["web", "search", "fetch", "browser", "cdp"],
   "targets": "linux/amd64"
 }

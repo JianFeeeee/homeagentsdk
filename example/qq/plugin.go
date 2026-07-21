@@ -808,7 +808,7 @@ func (p *Plugin) handleGetMessage(args map[string]interface{}) (interface{}, err
 		"group_id":     found.GroupID,
 		"nickname":     found.Nickname,
 		"message_type": found.MessageType,
-		"time":         time.Unix(found.Time, 0).Format("15:04:05"),
+		"time":         time.Unix(found.Time, 0).Format("2006-01-02 15:04:05"),
 	}
 	if found.RawText != "" {
 		result["raw_text"] = found.RawText
@@ -1103,7 +1103,7 @@ func (p *Plugin) handleGetHistory(args map[string]interface{}) (interface{}, err
 		}
 		ts := ""
 		if t, ok := msg["time"].(float64); ok {
-			ts = time.Unix(int64(t), 0).Format("15:04")
+			ts = time.Unix(int64(t), 0).Format("2006-01-02 15:04")
 		}
 		line := msgText
 		if sender != "" {

@@ -15,8 +15,11 @@ dist/
 testdist/
 
 # Logs
-*.logz_bridge_gen.go\nz_entry.c\nbuild/\ndist/
+*.log
+
+# Generated bridge files
 z_bridge_gen.go
 z_entry.c
-build/
-dist/
+
+# Binary
+plugindev
