@@ -25,7 +25,7 @@ func (p *Plugin) Start(s *sdk.PluginSDK) error {
 	s.SetAutoRestart(true)
 	p.sdk = s
 	s.Settings().RegisterDef(sdk.ConfigDef{
-		Key:         "plugin.files.dir",
+		Key:         "dir",
 		Default:     "/",
 		Type:        "string",
 		DisplayName: "文件系统根目录",

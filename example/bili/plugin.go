@@ -25,7 +25,7 @@ func (p *Plugin) Start(s *sdk.PluginSDK) error {
 	tp := p.name + "_"
 
 	s.Settings().RegisterDef(sdk.ConfigDef{
-		Key: "plugin." + p.name + ".output_dir", Default: "/tmp/bili_videos",
+		Key: "output_dir", Default: "/tmp/bili_videos",
 		Type: "string", DisplayName: "下载目录",
 		Description: "B站视频下载后的保存目录",
 		Category: p.name,
@@ -81,7 +81,7 @@ func (p *Plugin) handleBiliVideo(args map[string]interface{}) (interface{}, erro
 
 	outputDir := "/tmp/bili_videos"
 	if p.sdk != nil {
-		if v, _ := p.sdk.Settings().Get("plugin." + p.name + ".output_dir"); v != nil {
+		if v, _ := p.sdk.Settings().Get("output_dir"); v != nil {
 			if s, ok := v.(string); ok && s != "" {
 				outputDir = s
 			}

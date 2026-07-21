@@ -43,81 +43,61 @@ func NewPlugin(name string, config map[string]interface{}) (sdk.Plugin, error) {
 
 func (p *Plugin) Name() string { return p.name }
 
-func readCfg[T string | int64 | float64](s sdk.SettingsAPI, key string, fallback T) T {
+func getSetting[T string | int64 | float64](s sdk.SettingsAPI, key string, fallback T) T {
 	v, err := s.Get(key)
-	if err == nil && v != nil {
-		if sv, ok := v.(string); ok && sv != "" {
-			switch any(fallback).(type) {
-			case string:
-				return any(sv).(T)
-			case int64:
-				if n, err := strconv.ParseInt(sv, 10, 64); err == nil {
-					return any(n).(T)
-				}
-			case float64:
-				if n, err := strconv.ParseFloat(sv, 64); err == nil {
-					return any(n).(T)
-				}
+	if err != nil || v == nil {
+		return fallback
+	}
+	switch any(fallback).(type) {
+	case string:
+		if sv, ok := v.(string); ok {
+			return any(sv).(T)
+		}
+	case int64:
+		switch val := v.(type) {
+		case float64:
+			return any(int64(val)).(T)
+		case string:
+			if n, err := strconv.ParseInt(val, 10, 64); err == nil {
+				return any(n).(T)
 			}
 		}
-	}
-	v2, err2 := s.GetCore("plugin." + "rss" + "." + key)
-	if err2 == nil && v2 != nil {
-		if sv, ok := v2.(string); ok && sv != "" {
-			switch any(fallback).(type) {
-			case string:
-				return any(sv).(T)
-			case int64:
-				if n, err := strconv.ParseInt(sv, 10, 64); err == nil {
-					return any(n).(T)
-				}
-			case float64:
-				if n, err := strconv.ParseFloat(sv, 64); err == nil {
-					return any(n).(T)
-				}
+	case float64:
+		switch val := v.(type) {
+		case float64:
+			return any(val).(T)
+		case string:
+			if n, err := strconv.ParseFloat(val, 64); err == nil {
+				return any(n).(T)
 			}
 		}
 	}
 	return fallback
 }
 
-func readArg[T string | int64 | float64](args map[string]interface{}, key string, fallback T) T {
-	v, ok := args[key]
-	if !ok || v == nil {
-		return fallback
-	}
-	switch any(fallback).(type) {
-	case string:
+func readArg(args map[string]interface{}, key string) string {
+	if v, ok := args[key]; ok && v != nil {
 		if s, ok := v.(string); ok {
-			return any(s).(T)
+			return s
 		}
-	case int64:
+	}
+	return ""
+}
+
+func readArgInt(args map[string]interface{}, key string, fallback int) int {
+	if v, ok := args[key]; ok && v != nil {
 		switch n := v.(type) {
 		case float64:
-			return any(int64(n)).(T)
+			return int(n)
 		case int64:
-			return any(n).(T)
-		case string:
-			if i, err := strconv.ParseInt(n, 10, 64); err == nil {
-				return any(i).(T)
-			}
-		}
-	case float64:
-		switch n := v.(type) {
-		case float64:
-			return any(n).(T)
-		case int64:
-			return any(float64(n)).(T)
-		case string:
-			if f, err := strconv.ParseFloat(n, 64); err == nil {
-				return any(f).(T)
-			}
+			return int(n)
 		}
 	}
 	return fallback
 }
 
 func (p *Plugin) Start(s *sdk.PluginSDK) error {
+	s.SetAutoRestart(true)
 	p.sdk = s
 	p.client = &http.Client{Timeout: 30 * time.Second}
 	p.fp = gofeed.NewParser()
@@ -134,7 +114,7 @@ func (p *Plugin) Start(s *sdk.PluginSDK) error {
 	p.loadData()
 
 	s.Settings().RegisterDef(sdk.ConfigDef{
-		Key: "plugin.rss.poll_interval", Default: "30", Type: "string",
+		Key: "poll_interval", Default: "30", Type: "string",
 		DisplayName: "Poll Interval", Description: "Default polling interval in minutes (default: 30)",
 		Category: "rss",
 	})
@@ -179,7 +159,7 @@ func (p *Plugin) Start(s *sdk.PluginSDK) error {
 		},
 	}, p.handleCheckNow)
 
-	pollMin := int(readCfg(s.Settings(), "poll_interval", int64(30)))
+	pollMin := int(getSetting(s.Settings(), "poll_interval", int64(30)))
 	if pollMin < 5 {
 		pollMin = 5
 	}
@@ -300,7 +280,7 @@ func (p *Plugin) checkFeed(sub FeedSub) {
 }
 
 func (p *Plugin) handleSubscribe(args map[string]interface{}) (interface{}, error) {
-	url := readArg(args, "url", "")
+	url := readArg(args, "url")
 	if url == "" {
 		return map[string]interface{}{"isError": true, "content": "URL is required"}, nil
 	}
@@ -314,7 +294,7 @@ func (p *Plugin) handleSubscribe(args map[string]interface{}) (interface{}, erro
 	}
 	p.mu.RUnlock()
 
-	interval := int(readArg(args, "interval", int64(30)))
+	interval := readArgInt(args, "interval", 30)
 	if interval < 5 {
 		interval = 5
 	}
@@ -360,7 +340,7 @@ func (p *Plugin) handleSubscribe(args map[string]interface{}) (interface{}, erro
 }
 
 func (p *Plugin) handleUnsubscribe(args map[string]interface{}) (interface{}, error) {
-	url := readArg(args, "url", "")
+	url := readArg(args, "url")
 	if url == "" {
 		return map[string]interface{}{"isError": true, "content": "URL is required"}, nil
 	}

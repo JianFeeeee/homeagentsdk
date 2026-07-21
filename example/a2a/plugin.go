@@ -28,7 +28,7 @@ func (p *Plugin) Start(s *sdk.PluginSDK) error {
 	tp := p.name + "_"
 
 	s.Settings().RegisterDef(sdk.ConfigDef{
-		Key: "plugin." + p.name + ".listen", Default: "127.0.0.1:12000",
+		Key: "listen", Default: "127.0.0.1:12000",
 		Type: "string", DisplayName: "监听地址",
 		Description: "A2A 服务端监听地址，设为空可禁用 HTTP 服务",
 		Category: p.name,
@@ -60,7 +60,7 @@ func (p *Plugin) Start(s *sdk.PluginSDK) error {
 	}, p.handleA2ADiscover)
 
 	// Inbound HTTP server
-	if addr, _ := s.Settings().Get("plugin." + p.name + ".listen"); addr != nil {
+	if addr, _ := s.Settings().Get("listen"); addr != nil {
 		if addrStr, ok := addr.(string); ok && addrStr != "" {
 			p.startServer(addrStr)
 		}

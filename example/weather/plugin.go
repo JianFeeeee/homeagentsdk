@@ -32,18 +32,15 @@ func (p *Plugin) Start(s *sdk.PluginSDK) error {
 	p.sdk = s
 	p.client = &http.Client{Timeout: 15 * time.Second}
 
-	loc, err := s.Settings().Get("default_location")
-	if err == nil && loc != nil {
-		if v, ok := loc.(string); ok && v != "" {
-			p.defaultLoc = v
-		}
-	}
-	if p.defaultLoc == "" {
-		v, err := s.Settings().GetCore("plugin.weather.default_location")
-		if err == nil && v != nil {
-			if vs, ok := v.(string); ok && vs != "" {
-				p.defaultLoc = vs
-			}
+	s.Settings().RegisterDef(sdk.ConfigDef{
+		Key: "default_location", Default: "", Type: "string",
+		DisplayName: "Default Location", Description: "Default city name for weather queries, e.g. Beijing",
+		Category: "weather",
+	})
+
+	if v, _ := s.Settings().Get("default_location"); v != nil {
+		if vs, ok := v.(string); ok {
+			p.defaultLoc = vs
 		}
 	}
 
@@ -51,14 +48,7 @@ func (p *Plugin) Start(s *sdk.PluginSDK) error {
 	if dataHome == "" {
 		dataHome = "/tmp"
 	}
-	dataDir := filepath.Join(dataHome, ".homeagent", "weather")
-	os.MkdirAll(dataDir, 0755)
-
-	s.Settings().RegisterDef(sdk.ConfigDef{
-		Key: "plugin.weather.default_location", Default: "", Type: "string",
-		DisplayName: "Default Location", Description: "Default city name for weather queries, e.g. Beijing",
-		Category: "weather",
-	})
+	os.MkdirAll(filepath.Join(dataHome, ".homeagent", "weather"), 0755)
 
 	tp := p.name + "_"
 	s.RegisterTool(tp+"current", sdk.ToolDef{
@@ -382,7 +372,7 @@ func (p *Plugin) handleSetLocation(args map[string]interface{}) (interface{}, er
 		return map[string]interface{}{"isError": true, "content": "Location is required"}, nil
 	}
 
-	p.sdk.Settings().SetCore("plugin.weather.default_location", loc)
+	p.sdk.Settings().Set("default_location", loc)
 	p.defaultLoc = loc
 	return map[string]interface{}{"content": fmt.Sprintf("Default location set to: %s", loc)}, nil
 }

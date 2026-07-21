@@ -29,50 +29,48 @@ func NewPlugin(name string, config map[string]interface{}) (sdk.Plugin, error) {
 
 func (p *Plugin) Name() string { return p.name }
 
-func readCfg[T string | int64 | float64](s sdk.SettingsAPI, key string, fallback T) T {
+func getSetting[T string | int64 | float64](s sdk.SettingsAPI, key string, def T) T {
 	v, err := s.Get(key)
-	if err == nil && v != nil {
-		if sv, ok := v.(string); ok && sv != "" {
-			switch any(fallback).(type) {
-			case string:
-				return any(sv).(T)
-			case int64:
-				if n, err := strconv.ParseInt(sv, 10, 64); err == nil {
-					return any(n).(T)
-				}
-			case float64:
-				if n, err := strconv.ParseFloat(sv, 64); err == nil {
-					return any(n).(T)
-				}
+	if err != nil || v == nil {
+		return def
+	}
+	switch any(def).(type) {
+	case string:
+		if sv, ok := v.(string); ok {
+			return any(sv).(T)
+		}
+	case int64:
+		switch n := v.(type) {
+		case float64:
+			return any(int64(n)).(T)
+		case int64:
+			return any(n).(T)
+		case string:
+			if i, err := strconv.ParseInt(n, 10, 64); err == nil {
+				return any(i).(T)
+			}
+		}
+	case float64:
+		switch n := v.(type) {
+		case float64:
+			return any(n).(T)
+		case int64:
+			return any(float64(n)).(T)
+		case string:
+			if f, err := strconv.ParseFloat(n, 64); err == nil {
+				return any(f).(T)
 			}
 		}
 	}
-	v2, err2 := s.GetCore("plugin." + "ai_image" + "." + key)
-	if err2 == nil && v2 != nil {
-		if sv, ok := v2.(string); ok && sv != "" {
-			switch any(fallback).(type) {
-			case string:
-				return any(sv).(T)
-			case int64:
-				if n, err := strconv.ParseInt(sv, 10, 64); err == nil {
-					return any(n).(T)
-				}
-			case float64:
-				if n, err := strconv.ParseFloat(sv, 64); err == nil {
-					return any(n).(T)
-				}
-			}
-		}
-	}
-	return fallback
+	return def
 }
 
-func readArg[T string | int64 | float64](args map[string]interface{}, key string, fallback T) T {
+func getArg[T string | int64 | float64](args map[string]interface{}, key string, def T) T {
 	v, ok := args[key]
 	if !ok || v == nil {
-		return fallback
+		return def
 	}
-	switch any(fallback).(type) {
+	switch any(def).(type) {
 	case string:
 		if s, ok := v.(string); ok {
 			return any(s).(T)
@@ -100,39 +98,39 @@ func readArg[T string | int64 | float64](args map[string]interface{}, key string
 			}
 		}
 	}
-	return fallback
+	return def
 }
 
 func (p *Plugin) Start(s *sdk.PluginSDK) error {
+	s.SetAutoRestart(true)
 	p.sdk = s
-
-	p.apiKey = readCfg(s.Settings(), "api_key", "")
-	p.provider = readCfg(s.Settings(), "provider", "openai")
-	p.model = readCfg(s.Settings(), "model", "dall-e-3")
-	p.size = readCfg(s.Settings(), "size", "1024x1024")
-
 	p.client = &http.Client{Timeout: 120 * time.Second}
 
 	s.Settings().RegisterDef(sdk.ConfigDef{
-		Key: "plugin.ai_image.api_key", Default: "", Type: "string",
+		Key: "api_key", Default: "", Type: "string",
 		DisplayName: "API Key", Description: "OpenAI / Stable Diffusion API Key",
 		Category: "ai_image", Secret: true,
 	})
 	s.Settings().RegisterDef(sdk.ConfigDef{
-		Key: "plugin.ai_image.provider", Default: "openai", Type: "string",
+		Key: "provider", Default: "openai", Type: "string",
 		DisplayName: "Provider", Description: "Image generation provider: openai / stability",
 		Category: "ai_image",
 	})
 	s.Settings().RegisterDef(sdk.ConfigDef{
-		Key: "plugin.ai_image.model", Default: "dall-e-3", Type: "string",
+		Key: "model", Default: "dall-e-3", Type: "string",
 		DisplayName: "Model", Description: "Model name (dall-e-3, sd-xl, etc.)",
 		Category: "ai_image",
 	})
 	s.Settings().RegisterDef(sdk.ConfigDef{
-		Key: "plugin.ai_image.size", Default: "1024x1024", Type: "string",
+		Key: "size", Default: "1024x1024", Type: "string",
 		DisplayName: "Size", Description: "Default image size (1024x1024, 1024x1792, 1792x1024)",
 		Category: "ai_image",
 	})
+
+	p.apiKey = getSetting(s.Settings(), "api_key", "")
+	p.provider = getSetting(s.Settings(), "provider", "openai")
+	p.model = getSetting(s.Settings(), "model", "dall-e-3")
+	p.size = getSetting(s.Settings(), "size", "1024x1024")
 
 	tp := p.name + "_"
 	s.RegisterTool(tp+"generate", sdk.ToolDef{
@@ -179,20 +177,20 @@ type openAIResp struct {
 }
 
 func (p *Plugin) handleGenerate(args map[string]interface{}) (interface{}, error) {
-	prompt := readArg(args, "prompt", "")
+	prompt := getArg(args, "prompt", "")
 	if prompt == "" {
 		return map[string]interface{}{"isError": true, "content": "prompt is required"}, nil
 	}
 
-	p.apiKey = readCfg(p.sdk.Settings(), "api_key", p.apiKey)
-	if p.apiKey == "" {
+	key := getSetting(p.sdk.Settings(), "api_key", p.apiKey)
+	if key == "" {
 		return map[string]interface{}{"isError": true, "content": "API key not configured. Set plugin.ai_image.api_key via CLI."}, nil
 	}
 
-	provider := readCfg(p.sdk.Settings(), "provider", p.provider)
-	model := readArg(args, "model", readCfg(p.sdk.Settings(), "model", p.model))
-	size := readArg(args, "size", readCfg(p.sdk.Settings(), "size", p.size))
-	n := readArg(args, "n", int64(1))
+	provider := getSetting(p.sdk.Settings(), "provider", p.provider)
+	model := getArg(args, "model", getSetting(p.sdk.Settings(), "model", p.model))
+	size := getArg(args, "size", getSetting(p.sdk.Settings(), "size", p.size))
+	n := getArg(args, "n", int64(1))
 	if n < 1 {
 		n = 1
 	}
@@ -202,15 +200,15 @@ func (p *Plugin) handleGenerate(args map[string]interface{}) (interface{}, error
 
 	switch provider {
 	case "openai":
-		return p.generateOpenAI(prompt, model, size, int(n))
+		return p.generateOpenAI(prompt, model, size, int(n), key)
 	case "stability":
-		return p.generateStability(prompt, model, size, int(n))
+		return p.generateStability(prompt, model, size, int(n), key)
 	default:
 		return map[string]interface{}{"isError": true, "content": "Unknown provider: " + provider + ". Supported: openai, stability"}, nil
 	}
 }
 
-func (p *Plugin) generateOpenAI(prompt, model, size string, n int) (interface{}, error) {
+func (p *Plugin) generateOpenAI(prompt, model, size string, n int, apiKey string) (interface{}, error) {
 	body := openAIReq{
 		Model:          model,
 		Prompt:         prompt,
@@ -222,7 +220,7 @@ func (p *Plugin) generateOpenAI(prompt, model, size string, n int) (interface{},
 	b, _ := json.Marshal(body)
 	req, _ := http.NewRequest("POST", "https://api.openai.com/v1/images/generations", bytes.NewReader(b))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+p.apiKey)
+	req.Header.Set("Authorization", "Bearer "+apiKey)
 
 	resp, err := p.client.Do(req)
 	if err != nil {
@@ -279,7 +277,7 @@ type stabilityResp struct {
 	Message   string              `json:"message,omitempty"`
 }
 
-func (p *Plugin) generateStability(prompt, model, size string, n int) (interface{}, error) {
+func (p *Plugin) generateStability(prompt, model, size string, n int, apiKey string) (interface{}, error) {
 	width, height := 1024, 1024
 	if parts := strings.Split(size, "x"); len(parts) == 2 {
 		if w, err := strconv.Atoi(parts[0]); err == nil {
@@ -302,7 +300,7 @@ func (p *Plugin) generateStability(prompt, model, size string, n int) (interface
 	b, _ := json.Marshal(body)
 	req, _ := http.NewRequest("POST", apiURL, bytes.NewReader(b))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+p.apiKey)
+	req.Header.Set("Authorization", "Bearer "+apiKey)
 	req.Header.Set("Accept", "application/json")
 
 	resp, err := p.client.Do(req)
