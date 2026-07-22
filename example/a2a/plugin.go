@@ -15,9 +15,10 @@ import (
 )
 
 type Plugin struct {
-	name   string
-	sdk    *sdk.PluginSDK
-	server *http.Server
+	name       string
+	sdk        *sdk.PluginSDK
+	server     *http.Server
+	serverAddr string
 }
 
 func (p *Plugin) Name() string { return p.name }
@@ -59,6 +60,33 @@ func (p *Plugin) Start(s *sdk.PluginSDK) error {
 		},
 	}, p.handleA2ADiscover)
 
+	// Management tools
+	s.RegisterTool(tp+"a2a_configure", sdk.ToolDef{
+		Name: tp + "a2a_configure", Description: "修改 A2A 插件配置并自动重启服务。支持动态更改监听地址等参数。",
+		Parameters: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"listen": map[string]interface{}{"type": "string", "description": "监听地址（如 0.0.0.0:12000，设为空字符串禁用 HTTP 服务）"},
+			},
+		},
+	}, p.handleConfigure)
+
+	s.RegisterTool(tp+"a2a_restart", sdk.ToolDef{
+		Name: tp + "a2a_restart", Description: "重启 A2A HTTP 服务端。当连接异常或配置变更后需要重新加载时使用。",
+		Parameters: map[string]interface{}{
+			"type":       "object",
+			"properties": map[string]interface{}{},
+		},
+	}, p.handleRestart)
+
+	s.RegisterTool(tp+"a2a_status", sdk.ToolDef{
+		Name: tp + "a2a_status", Description: "查看 A2A 插件的运行状态，包括监听地址和当前配置。",
+		Parameters: map[string]interface{}{
+			"type":       "object",
+			"properties": map[string]interface{}{},
+		},
+	}, p.handleStatus)
+
 	// Inbound HTTP server
 	if addr, _ := s.Settings().Get("listen"); addr != nil {
 		if addrStr, ok := addr.(string); ok && addrStr != "" {
@@ -71,10 +99,16 @@ func (p *Plugin) Start(s *sdk.PluginSDK) error {
 }
 
 func (p *Plugin) Stop() error {
+	p.stopServer()
+	return nil
+}
+
+func (p *Plugin) stopServer() {
 	if p.server != nil {
 		p.server.Close()
+		p.server = nil
+		p.serverAddr = ""
 	}
-	return nil
 }
 
 // ---- Inbound HTTP Server ----
@@ -92,8 +126,9 @@ func (p *Plugin) startServer(addr string) {
 	}
 
 	p.server = &http.Server{Handler: mux}
+	p.serverAddr = listener.Addr().String()
 	go func() {
-		log.Printf("[%s] A2A server on %s", p.name, listener.Addr())
+		log.Printf("[%s] A2A server on %s", p.name, p.serverAddr)
 		if err := p.server.Serve(listener); err != nil && err != http.ErrServerClosed {
 			log.Printf("[%s] serve: %v", p.name, err)
 		}
@@ -363,6 +398,60 @@ func (p *Plugin) handleA2AQuery(args map[string]interface{}) (interface{}, error
 		"task_id": a2aResp.Result.TaskID, "status": a2aResp.Result.Status,
 		"response": replyText,
 	}, nil
+}
+
+// ---- Management Handlers ----
+
+func (p *Plugin) handleConfigure(args map[string]interface{}) (interface{}, error) {
+	listen, _ := args["listen"].(string)
+	if listen == "" {
+		return "参数 listen 不能为空。设为空字符串可禁用 HTTP 服务。", nil
+	}
+
+	if err := p.sdk.Settings().Set("listen", listen); err != nil {
+		return fmt.Sprintf("保存配置失败: %v", err), nil
+	}
+
+	p.stopServer()
+	if listen != "" {
+		p.startServer(listen)
+	}
+
+	status := "已启动"
+	if listen == "" {
+		status = "已禁用"
+	}
+	return fmt.Sprintf("A2A 配置已更新。监听地址: %s (%s)", listen, status), nil
+}
+
+func (p *Plugin) handleRestart(args map[string]interface{}) (interface{}, error) {
+	p.stopServer()
+
+	addr, _ := p.sdk.Settings().Get("listen")
+	addrStr, _ := addr.(string)
+	if addrStr == "" {
+		return "A2A 服务未配置监听地址（listen 为空），无法启动", nil
+	}
+
+	p.startServer(addrStr)
+	if p.server == nil {
+		return fmt.Sprintf("A2A 服务启动失败，请检查监听地址: %s", addrStr), nil
+	}
+	return fmt.Sprintf("A2A 服务已重启，监听: %s", p.serverAddr), nil
+}
+
+func (p *Plugin) handleStatus(args map[string]interface{}) (interface{}, error) {
+	addr, _ := p.sdk.Settings().Get("listen")
+	addrStr, _ := addr.(string)
+
+	serverRunning := p.server != nil
+	listening := p.serverAddr
+	if !serverRunning {
+		listening = "未运行"
+	}
+
+	return fmt.Sprintf("配置监听地址: %s\n当前监听: %s\n服务状态: %s",
+		addrStr, listening, map[bool]string{true: "运行中", false: "已停止"}[serverRunning]), nil
 }
 
 func NewPlugin(name string, config map[string]interface{}) (sdk.Plugin, error) {
