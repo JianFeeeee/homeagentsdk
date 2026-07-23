@@ -17,31 +17,11 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"sync"
+
 	"time"
 
 	"gitcode.com/JianFeeeee/homeagent-sdk/sdk"
 )
-
-type SavedMessage struct {
-	LocalID     int64  `json:"local_id"`
-	MessageID   int64  `json:"message_id"`
-	UserID      int64  `json:"user_id"`
-	Nickname    string `json:"nickname"`
-	GroupID     int64  `json:"group_id,omitempty"`
-	GroupName   string `json:"group_name,omitempty"`
-	MessageType string `json:"message_type"`
-	Text        string `json:"text"`
-	RawText     string `json:"raw_text,omitempty"`
-	ReplyToID  int64  `json:"reply_to_id,omitempty"`
-	ReplyToText string `json:"reply_to_text,omitempty"`
-	HasImage    bool   `json:"has_image,omitempty"`
-	HasFile     bool   `json:"has_file,omitempty"`
-	FilePath    string `json:"file_path,omitempty"`
-	Time        int64  `json:"time"`
-}
-
-const maxMessages = 2000
 
 type ForwardRule struct {
 	GroupID  int64  `json:"group_id"`
@@ -97,9 +77,6 @@ func rconPacket(id, typ int32, body string) []byte {
 type Plugin struct {
 	name           string
 	sdk            *sdk.PluginSDK
-	mu             sync.RWMutex
-	messages       []*SavedMessage
-	nextID         int64
 	listenAddr     string
 	napcatURL      string
 	remoteDir      string
@@ -113,7 +90,6 @@ type Plugin struct {
 	allowFrom      map[int64]struct{}
 	groupAllowFrom map[int64]struct{}
 	srv            *http.Server
-	groupNameCache map[int64]string
 	agentfsDir     string
 }
 
@@ -149,7 +125,7 @@ func (p *Plugin) Start(s *sdk.PluginSDK) error {
 	p.remoteDir = strings.TrimRight(getSetting[string](settings, "remote_dir", "/home/program/qq-workspace/remote"), "/")
 	os.MkdirAll(p.remoteDir, 0755)
 
-	p.httpClient = &http.Client{Timeout: 5 * time.Second}
+	p.httpClient = &http.Client{Timeout: 30 * time.Second}
 
 	// 从 NapCat 获取 Bot 身份（阻塞等待，最多 5s）
 	p.fetchBotInfo()
@@ -181,11 +157,10 @@ type 枚举: text（文字）/ voice（语音转文字后发送）/ image（图�
 		p.handleChannelOutput)
 
 	// ---- 消息 ----
-	p.regTool(s, tp+"get_message", botInfo+"获取QQ消息正文和详细信息。可通过local_id（中断消息中的id号）或message_id（NapCat消息ID，reply_to中的id）查找。返回消息的完整信息包括发送者、引用回复（reply_to）、图片/文件标记等。若消息有引用回复，建议再用qq_get_history拉取最近消息确认上下文。", map[string]interface{}{
+	p.regTool(s, tp+"get_message", botInfo+"通过 message_id 从 NapCat 实时获取消息正文、发送者、附件等信息。message_id 从中断消息的 message_id=N 获取，或从 reply_to 的 message_id 获取。", map[string]interface{}{
 		"type": "object", "properties": map[string]interface{}{
-			"local_id":   map[string]interface{}{"type": "integer", "description": "本地消息ID（来自中断消息中的id号），与message_id二选一"},
-			"message_id": map[string]interface{}{"type": "integer", "description": "NapCat消息ID（来自reply_to.message_id），与local_id二选一"},
-		},
+			"message_id": map[string]interface{}{"type": "integer", "description": "NapCat消息ID（从中断消息的 message_id=N 或 reply_to.message_id 获取）"},
+		}, "required": []string{"message_id"},
 	}, p.handleGetMessage)
 
 	p.regTool(s, tp+"send_file", "发送文件/图片到QQ（私聊或群聊）。文件先复制到remote目录供NapCat容器访问。", map[string]interface{}{
@@ -198,7 +173,7 @@ type 枚举: text（文字）/ voice（语音转文字后发送）/ image（图�
 		},
 	}, p.handleSendFile)
 
-	p.regTool(s, tp+"get_history", "获取QQ群聊/私聊最近历史消息。当收到引用回复消息或需要了解对话上下文时应优先调用此工具查看前后文。返回值每条格式为 [时间] 发送者: 消息内容", map[string]interface{}{
+	p.regTool(s, tp+"get_history", "获取QQ群聊/私聊最近历史消息。当收到引用回复消息或需要了解对话上下文时应优先调用此工具查看前后文。返回值每条格式为 [时间] 发送者: 消息内容。如果消息包含文件，会额外返回 files 字段（含 file_id 和 name），可用 qq_download_file 工具下载。", map[string]interface{}{
 		"type": "object", "properties": map[string]interface{}{
 			"group_id": map[string]interface{}{"type": "integer", "description": "群号（与user_id二选一）"},
 			"user_id":  map[string]interface{}{"type": "integer", "description": "QQ号私聊历史（与group_id二选一）"},
@@ -281,6 +256,15 @@ type 枚举: text（文字）/ voice（语音转文字后发送）/ image（图�
 			"filename": map[string]interface{}{"type": "string", "description": "保存文件名（download可选）"},
 		},
 	}, p.handleGetGroupFiles)
+
+	p.regTool(s, tp+"download_file", "从聊天记录下载文件到本地。file_id 从 qq_get_message/qq_get_history 的 files 字段获取。qq_get_message 还会返回 url（若可用），提供 url 可绕过 NapCat 缓存直接下载。群文件建议提供 group_id。下载成功返回本地路径。", map[string]interface{}{
+		"type": "object", "properties": map[string]interface{}{
+			"file_id":  map[string]interface{}{"type": "string", "description": "文件 ID（从 qq_get_message 或 qq_get_history 的 files 字段获取）"},
+			"url":      map[string]interface{}{"type": "string", "description": "文件下载 URL（可选，qq_get_message 返回的 url 字段，用于绕过 NapCat 缓存直接下载）"},
+			"group_id": map[string]interface{}{"type": "integer", "description": "群号（可选，群文件下载时提供可提高成功率）"},
+			"filename": map[string]interface{}{"type": "string", "description": "保存文件名（可选，默认用原文件名）"},
+		}, "required": []string{"file_id"},
+	}, p.handleDownloadFile)
 
 	p.regTool(s, tp+"upload_group_file", "上传文件到QQ群（通过base64编码发送，同时出现在群消息和群文件柜）", map[string]interface{}{
 		"type": "object", "properties": map[string]interface{}{
@@ -585,58 +569,11 @@ func (p *Plugin) handleWebhook(w http.ResponseWriter, r *http.Request) {
 			text = s
 		}
 	}
-	if text == "" {
-		w.WriteHeader(http.StatusOK)
-		return
-	}
-
-	// 提取引用回复和附件信息
-	var replyToID int64
-	var hasImage, hasFile bool
-	var filePath string
-
-	// 如果有结构化消息段，解析并下载文件/图片，生成可读文本
-	if segments, ok := evt.Message.([]interface{}); ok && len(segments) > 0 {
-		for _, seg := range segments {
-			s, ok := seg.(map[string]interface{})
-			if !ok {
-				continue
-			}
-			typ, _ := s["type"].(string)
-			data, _ := s["data"].(map[string]interface{})
-			if data == nil {
-				continue
-			}
-			switch typ {
-			case "reply":
-				if idStr, ok := data["id"].(string); ok {
-					replyToID, _ = strconv.ParseInt(idStr, 10, 64)
-				} else if id, ok := data["id"].(float64); ok {
-					replyToID = int64(id)
-				}
-			case "image":
-				hasImage = true
-			case "file":
-				hasFile = true
-				if name, ok := data["name"].(string); ok && name != "" {
-					filePath = name
-				}
-			}
-		}
-		parsedText := p.processMessageSegments(segments)
-		if parsedText != "" {
-			text = parsedText
-		}
-	}
-
-	// 查找被引用的消息正文
-	replyToText := ""
-	if replyToID > 0 {
-		for _, sm := range p.messages {
-			if sm.MessageID == replyToID {
-				replyToText = sm.Text
-				break
-			}
+	nickname := ""
+	if evt.Sender != nil {
+		nickname = evt.Sender.Nickname
+		if evt.Sender.Card != "" {
+			nickname = evt.Sender.Card
 		}
 	}
 
@@ -663,68 +600,17 @@ func (p *Plugin) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	nickname := ""
-	if evt.Sender != nil {
-		nickname = evt.Sender.Nickname
-		if evt.Sender.Card != "" {
-			nickname = evt.Sender.Card
-		}
-	}
-
-	p.mu.Lock()
-	localID := p.nextID
-	p.nextID++
-
-	msg := &SavedMessage{
-		LocalID: localID, MessageID: evt.MessageID, UserID: evt.UserID, Nickname: nickname,
-		GroupID: evt.GroupID, MessageType: evt.MessageType, Text: text, RawText: rawCQ,
-		ReplyToID: replyToID, ReplyToText: replyToText,
-		HasImage: hasImage, HasFile: hasFile, FilePath: filePath,
-		Time: evt.Time,
-	}
-	groupName := ""
-	if evt.MessageType == "group" {
-		if n, ok := p.groupNameCache[evt.GroupID]; ok {
-			groupName = n
-		} else {
-			groupName = "群聊"
-			go func(gid int64) {
-				resp, err := p.napcat("get_group_info", map[string]interface{}{"group_id": gid})
-				if err != nil {
-					return
-				}
-				raw, _ := rawString(resp)
-				var gi struct {
-					Data *struct {
-						GroupName string `json:"group_name"`
-					} `json:"data"`
-				}
-				if json.Unmarshal([]byte(raw), &gi) == nil && gi.Data != nil && gi.Data.GroupName != "" {
-					p.mu.Lock()
-					p.groupNameCache[gid] = gi.Data.GroupName
-					p.mu.Unlock()
-				}
-			}(evt.GroupID)
-		}
-		msg.GroupName = groupName
-	}
-	p.messages = append(p.messages, msg)
-	if len(p.messages) > maxMessages {
-		p.messages = p.messages[1:]
-	}
-
 	tp := p.name + "_"
 	outputTool := "output_send__" + p.name
 	var interrupt string
 	if evt.MessageType == "group" {
-		interrupt = fmt.Sprintf("来自%s的（%s）群聊消息，通过id%d使用%sget_message工具获取消息正文。如果消息包含引用回复，使用%sget_history（group_id=%d）拉取最近消息以确认引用上下文。必须使用%s工具回复该群聊（用%s_help查看JSON格式要求），系统不会自动发送回复", nickname, groupName, localID, tp, tp, evt.GroupID, outputTool, outputTool)
+		interrupt = fmt.Sprintf("来自「%s」在群「%s」的消息(message_id=%d)。使用%sget_message(message_id=%d)获取消息正文。如果消息包含引用回复，使用%sget_history(group_id=%d)查看上下文。使用%s回复群聊", nickname, "群聊", evt.MessageID, tp, evt.MessageID, tp, evt.GroupID, outputTool)
 	} else {
-		interrupt = fmt.Sprintf("来自%s的私聊消息，通过id%d使用%sget_message工具获取消息正文。如果消息包含引用回复，使用%sget_history（user_id=%d）拉取最近消息以确认引用上下文。必须使用%s工具回复对方（用%s_help查看JSON格式要求），系统不会自动发送回复", nickname, localID, tp, tp, evt.UserID, outputTool, outputTool)
+		interrupt = fmt.Sprintf("来自「%s」的私聊消息(message_id=%d)。使用%sget_message(message_id=%d)获取消息正文。使用%s回复对方", nickname, evt.MessageID, tp, evt.MessageID, outputTool)
 	}
 	if p.adminID > 0 && evt.UserID == p.adminID {
 		interrupt = "【重要！老大消息】" + interrupt
 	}
-	p.mu.Unlock()
 
 	if evt.MessageType == "group" && p.sdk != nil {
 		rulesRaw := getSetting[string](p.sdk.Settings(), "forward_rules", "[]")
@@ -752,91 +638,150 @@ func (p *Plugin) handleWebhook(w http.ResponseWriter, r *http.Request) {
 // ======== Tool Handlers ========
 
 func (p *Plugin) handleGetMessage(args map[string]interface{}) (interface{}, error) {
-	id, err := convInt64(args["local_id"])
-	msgID, msgIDErr := convInt64(args["message_id"])
-
-	if err != nil && msgIDErr != nil {
+	msgID, err := convInt64(args["message_id"])
+	if err != nil {
 		return map[string]interface{}{
-			"content":   "需要提供 local_id 或 message_id 参数",
+			"content":   "需要提供 message_id 参数",
 			"not_found": true,
 		}, nil
 	}
 
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-
-	var found *SavedMessage
-	for _, m := range p.messages {
-		if err == nil && m.LocalID == id {
-			found = m
-			break
-		}
-		if msgIDErr == nil && m.MessageID == msgID {
-			found = m
-			break
-		}
-	}
-
-	if found == nil {
-		key := id
-		if err != nil {
-			key = msgID
-		}
+	raw, err := p.napcat("get_msg", map[string]interface{}{"message_id": msgID})
+	if err != nil {
 		return map[string]interface{}{
-			"content":   fmt.Sprintf("消息 %d 未找到。消息可能已被处理过期，或插件重启后本地缓存已清空。请使用 qq_get_history 从 NapCat 拉取历史消息。", key),
-			"local_id":  id,
+			"content":    fmt.Sprintf("查询 NapCat 失败: %s", err),
 			"message_id": msgID,
-			"not_found": true,
+			"not_found":  true,
+		}, nil
+	}
+	rawStr, _ := rawString(raw)
+	if rawStr == "" {
+		return map[string]interface{}{
+			"content":    "NapCat 返回空响应",
+			"message_id": msgID,
+			"not_found":  true,
 		}, nil
 	}
 
-	from := found.Nickname
-	if found.GroupName != "" && found.GroupName != fmt.Sprintf("%d", found.GroupID) {
-		from = fmt.Sprintf("%s（%s）", found.Nickname, found.GroupName)
+	var resp struct {
+		Data *struct {
+			MessageID   int64       `json:"message_id"`
+			UserID      int64       `json:"user_id"`
+			GroupID     int64       `json:"group_id"`
+			Time        int64       `json:"time"`
+			MessageType string      `json:"message_type"`
+			RawMessage  string      `json:"raw_message"`
+			Message     interface{} `json:"message"`
+			Sender      *struct {
+				Nickname string `json:"nickname"`
+				Card     string `json:"card"`
+			} `json:"sender"`
+		} `json:"data"`
 	}
+	if err := json.Unmarshal([]byte(rawStr), &resp); err != nil || resp.Data == nil {
+		return map[string]interface{}{
+			"content":    "解析 NapCat 响应失败",
+			"message_id": msgID,
+			"not_found":  true,
+		}, nil
+	}
+
+	d := resp.Data
+	nickname := ""
+	if d.Sender != nil {
+		nickname = d.Sender.Nickname
+		if d.Sender.Card != "" {
+			nickname = d.Sender.Card
+		}
+	}
+
+	content := d.RawMessage
+	var files []map[string]interface{}
+	var replyToID int64
+	var hasImage, hasFile bool
+	if segs, ok := d.Message.([]interface{}); ok {
+		var parts []string
+		for _, seg := range segs {
+			segMap, _ := seg.(map[string]interface{})
+			if segMap == nil {
+				continue
+			}
+			typ, _ := segMap["type"].(string)
+			segData, _ := segMap["data"].(map[string]interface{})
+			if segData == nil {
+				continue
+			}
+			switch typ {
+			case "text":
+				if t, _ := segData["text"].(string); t != "" {
+					parts = append(parts, t)
+				}
+			case "at":
+				if qq, _ := segData["qq"].(string); qq != "" {
+					parts = append(parts, "@"+qq)
+				}
+			case "reply":
+				if idStr, ok := segData["id"].(string); ok {
+					replyToID, _ = strconv.ParseInt(idStr, 10, 64)
+				} else if id, ok := segData["id"].(float64); ok {
+					replyToID = int64(id)
+				}
+				parts = append(parts, fmt.Sprintf("[回复id=%d]", replyToID))
+			case "file":
+				hasFile = true
+				fid, _ := segData["file_id"].(string)
+				if fid == "" {
+					fid, _ = segData["file"].(string)
+				}
+				name, _ := segData["name"].(string)
+				if name == "" {
+					name, _ = segData["file"].(string)
+				}
+				fileURL, _ := segData["url"].(string)
+				if fid != "" {
+					entry := map[string]interface{}{
+						"file_id": fid,
+						"name":    name,
+					}
+					if fileURL != "" {
+						entry["url"] = fileURL
+					}
+					files = append(files, entry)
+				}
+			case "image":
+				hasImage = true
+			}
+		}
+		if len(parts) > 0 {
+			content = strings.Join(parts, " ")
+		}
+	}
+
 	loc := "私聊"
-	if found.MessageType == "group" {
+	if d.MessageType == "group" {
 		loc = "群聊"
 	}
 	result := map[string]interface{}{
-		"content":      found.Text,
-		"local_id":     found.LocalID,
-		"message_id":   found.MessageID,
-		"from":         from,
+		"content":      content,
+		"message_id":   d.MessageID,
+		"user_id":      d.UserID,
+		"group_id":     d.GroupID,
+		"nickname":     nickname,
+		"message_type": d.MessageType,
 		"type":         loc,
-		"user_id":      found.UserID,
-		"group_id":     found.GroupID,
-		"nickname":     found.Nickname,
-		"message_type": found.MessageType,
-		"time":         time.Unix(found.Time, 0).Format("2006-01-02 15:04:05"),
+		"time":         time.Unix(d.Time, 0).Format("2006-01-02 15:04:05"),
 	}
-	if found.RawText != "" {
-		result["raw_text"] = found.RawText
+	if replyToID > 0 {
+		result["reply_to"] = map[string]interface{}{"message_id": replyToID}
 	}
-	if found.ReplyToID > 0 {
-		replyInfo := map[string]interface{}{
-			"message_id": found.ReplyToID,
-		}
-		if found.ReplyToText != "" {
-			replyInfo["content"] = found.ReplyToText
-		}
-		// 在本机缓存中查找被引用的消息 local_id
-		for _, sm := range p.messages {
-			if sm.MessageID == found.ReplyToID {
-				replyInfo["local_id"] = sm.LocalID
-				break
-			}
-		}
-		result["reply_to"] = replyInfo
-	}
-	if found.HasImage {
+	if hasImage {
 		result["has_image"] = true
 	}
-	if found.HasFile {
+	if hasFile {
 		result["has_file"] = true
 	}
-	if found.FilePath != "" {
-		result["file_name"] = found.FilePath
+	if len(files) > 0 {
+		result["files"] = files
 	}
 
 	return result, nil
@@ -1078,8 +1023,9 @@ func (p *Plugin) handleGetHistory(args map[string]interface{}) (interface{}, err
 		return map[string]interface{}{"raw_response": rawStr, "note": "解析 NapCat 响应失败"}, nil
 	}
 
-	// 格式化消息为可读文本
+	// 格式化消息为可读文本，并提取文件信息
 	var lines []string
+	var files []map[string]interface{}
 	for _, m := range resp.Data.Messages {
 		msg, ok := m.(map[string]interface{})
 		if !ok {
@@ -1096,7 +1042,54 @@ func (p *Plugin) handleGetHistory(args map[string]interface{}) (interface{}, err
 		}
 		msgText, _ := msg["raw_message"].(string)
 		if msgText == "" {
-			msgText, _ = msg["message"].(string)
+			if segs, ok := msg["message"].([]interface{}); ok {
+				var parts []string
+				for _, seg := range segs {
+					segMap, _ := seg.(map[string]interface{})
+					if segMap == nil {
+						continue
+					}
+					typ, _ := segMap["type"].(string)
+					segData, _ := segMap["data"].(map[string]interface{})
+					if segData == nil {
+						continue
+					}
+					switch typ {
+					case "text":
+						if t, _ := segData["text"].(string); t != "" {
+							parts = append(parts, t)
+						}
+					case "file":
+						name, _ := segData["name"].(string)
+						if name == "" {
+							name, _ = segData["file"].(string)
+						}
+						fid, _ := segData["file_id"].(string)
+						fileURL, _ := segData["url"].(string)
+						if name != "" {
+							parts = append(parts, "[文件:"+name+"]")
+						}
+						if fid != "" {
+							entry := map[string]interface{}{
+								"file_id":  fid,
+								"name":     name,
+								"position": len(lines),
+							}
+							if fileURL != "" {
+								entry["url"] = fileURL
+							}
+							files = append(files, entry)
+						}
+					case "image":
+						parts = append(parts, "[图片]")
+					case "video":
+						parts = append(parts, "[视频]")
+					}
+				}
+				if len(parts) > 0 {
+					msgText = strings.Join(parts, " ")
+				}
+			}
 		}
 		if msgText == "" {
 			continue
@@ -1122,10 +1115,14 @@ func (p *Plugin) handleGetHistory(args map[string]interface{}) (interface{}, err
 		}, nil
 	}
 
-	return map[string]interface{}{
+	result := map[string]interface{}{
 		"messages": lines,
 		"count":    len(lines),
-	}, nil
+	}
+	if len(files) > 0 {
+		result["files"] = files
+	}
+	return result, nil
 }
 
 func (p *Plugin) handleGetGroups(args map[string]interface{}) (interface{}, error) {
@@ -1457,6 +1454,38 @@ func (p *Plugin) handleGetGroupFiles(args map[string]interface{}) (interface{}, 
 	}
 }
 
+func (p *Plugin) handleDownloadFile(args map[string]interface{}) (interface{}, error) {
+	fileID, _ := args["file_id"].(string)
+	if fileID == "" {
+		return nil, fmt.Errorf("file_id is required")
+	}
+	fileURL, _ := args["url"].(string)
+	filename, _ := args["filename"].(string)
+	groupID, _ := convInt64(args["group_id"])
+
+	// 1. 有 URL 时直接下载（绕过 NapCat 缓存，用于私聊文件）
+	if fileURL != "" {
+		savePath := p.downloadURL(fileURL, filename)
+		if savePath != "" {
+			return map[string]interface{}{
+				"status": "ok", "path": savePath, "filename": filepath.Base(savePath),
+			}, nil
+		}
+	}
+
+	// 2. 群文件：用 get_group_file_url 获取新鲜下载链接
+	if groupID > 0 {
+		savePath := p.downloadGroupFile(groupID, fileID, filename)
+		if savePath != "" {
+			return map[string]interface{}{
+				"status": "ok", "path": savePath, "filename": filepath.Base(savePath),
+			}, nil
+		}
+	}
+
+	return map[string]interface{}{"error": "下载失败，文件可能已过期。请尝试用 qq_get_message 重新获取消息（可能包含新的下载 URL），或让发送者重新发送文件"}, nil
+}
+
 func (p *Plugin) handleUploadGroupFile(args map[string]interface{}) (interface{}, error) {
 	gid, _ := convInt64(args["group_id"])
 	filePath, _ := args["file"].(string)
@@ -1495,15 +1524,12 @@ func (p *Plugin) handleSendLike(args map[string]interface{}) (interface{}, error
 
 // ======== CQ Code / Message Segment Processing ========
 
-func (p *Plugin) processMessageSegments(segments []interface{}) string {
+func (p *Plugin) processMessageSegments(segments []interface{}, nickname string) string {
 	if len(segments) == 0 {
 		return ""
 	}
-	os.MkdirAll(p.filesDir, 0755)
 	botIDStr := strconv.FormatInt(p.botID, 10)
 	var parts []string
-	type dlItem struct{ fileID, name, url string }
-	var dlQueue []dlItem
 
 	for _, seg := range segments {
 		s, ok := seg.(map[string]interface{})
@@ -1535,48 +1561,11 @@ func (p *Plugin) processMessageSegments(segments []interface{}) string {
 				parts = append(parts, "[表情]")
 			}
 		case "file":
-			fid, _ := data["file_id"].(string)
-			if fid == "" {
-				fid, _ = data["file"].(string)
-			}
-			name, _ := data["name"].(string)
-			fileURL, _ := data["url"].(string)
-			size, _ := data["size"].(string)
-			sizeDesc := ""
-			if s, err := strconv.ParseInt(size, 10, 64); err == nil && s > 0 {
-				sizeDesc = fmt.Sprintf(" (%.1f MB)", float64(s)/1048576)
-			}
-			if fid != "" || fileURL != "" {
-				dlQueue = append(dlQueue, dlItem{fileID: fid, name: name, url: fileURL})
-			}
-			if name != "" {
-				parts = append(parts, fmt.Sprintf("[文件:%s%s]", name, sizeDesc))
-			} else {
-				parts = append(parts, "[文件]")
-			}
+			parts = append(parts, fmt.Sprintf("[%s发送了文件]", nickname))
 		case "image":
-			fid, _ := data["file"].(string)
-			summary, _ := data["summary"].(string)
-			imgURL, _ := data["url"].(string)
-			if fid != "" {
-				dlQueue = append(dlQueue, dlItem{fileID: fid, name: "image_" + fid + ".jpg", url: imgURL})
-			} else if imgURL != "" {
-				dlQueue = append(dlQueue, dlItem{url: imgURL, name: "image_" + filepath.Base(imgURL)})
-			}
-			label := "图片"
-			if summary != "" {
-				label = summary
-			}
-			parts = append(parts, fmt.Sprintf("[%s]", label))
+			parts = append(parts, fmt.Sprintf("[%s发送了图片]", nickname))
 		case "video":
-			fid, _ := data["file"].(string)
-			videoURL, _ := data["url"].(string)
-			if fid != "" {
-				dlQueue = append(dlQueue, dlItem{fileID: fid, name: "video_" + fid + ".mp4", url: videoURL})
-			} else if videoURL != "" {
-				dlQueue = append(dlQueue, dlItem{url: videoURL, name: "video_" + filepath.Base(videoURL)})
-			}
-			parts = append(parts, "[视频]")
+			parts = append(parts, fmt.Sprintf("[%s发送了视频]", nickname))
 		case "reply":
 			if id, ok := data["id"].(float64); ok {
 				parts = append(parts, fmt.Sprintf("[回复消息id=%.0f]", id))
@@ -1602,132 +1591,67 @@ func (p *Plugin) processMessageSegments(segments []interface{}) string {
 		}
 	}
 
-	// 异步下载文件（不影响消息处理）
-	if len(dlQueue) > 0 {
-		go func(items []dlItem) {
-			for _, item := range items {
-				p.downloadFile(item.fileID, item.name, item.url)
-			}
-		}(dlQueue)
-	}
-
 	return strings.TrimSpace(strings.Join(parts, " "))
 }
 
-func (p *Plugin) downloadFile(fileID, filename, fileURL string) string {
+func (p *Plugin) downloadGroupFile(groupID int64, fileID, filename string) string {
+	resp, err := p.napcat("get_group_file_url", map[string]interface{}{"group_id": groupID, "file_id": fileID})
+	if err != nil {
+		return ""
+	}
+	respStr, _ := rawString(resp)
+	if respStr == "" {
+		return ""
+	}
+	var parsed struct {
+		Data struct {
+			URL string `json:"url"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(respStr), &parsed); err != nil || parsed.Data.URL == "" {
+		return ""
+	}
 	if p.filesDir == "" {
 		return ""
 	}
 	os.MkdirAll(p.filesDir, 0755)
-
-	// 优先使用 URL 直下（NapCat 消息 data 中的 url 字段）
-	if fileURL != "" {
-		if filename == "" {
-			filename = "file_" + filepath.Base(fileURL)
-		}
-		filename = sanitizeFilename(filename)
-		localPath := filepath.Join(p.filesDir, filename)
-		dlResp, err := p.httpClient.Get(fileURL)
-		if err == nil {
-			defer dlResp.Body.Close()
-			data, err := io.ReadAll(dlResp.Body)
-			if err == nil && len(data) > 0 {
-				os.WriteFile(localPath, data, 0644)
-				return localPath
-			}
-		}
+	if filename == "" {
+		filename = "group_file_" + fileID
 	}
-
-	if fileID == "" {
-		return ""
-	}
-
-	// 处理 base64:// 前缀的内嵌文件
-	if strings.HasPrefix(fileID, "base64://") {
-		data, err := base64.StdEncoding.DecodeString(fileID[9:])
-		if err != nil {
-			return ""
-		}
-		if filename == "" {
-			filename = "file.bin"
-		}
-		filename = sanitizeFilename(filename)
-		localPath := filepath.Join(p.filesDir, filename)
-		os.WriteFile(localPath, data, 0644)
-		return localPath
-	}
-
-	// 处理 file:// 路径
-	if strings.HasPrefix(fileID, "file://") {
-		localFile := strings.TrimPrefix(fileID, "file://")
-		if _, err := os.Stat(localFile); err == nil {
-			return localFile
-		}
-	}
-
-	// 通过 NapCat get_file API 获取文件信息
-	raw, err := p.napcat("get_file", map[string]interface{}{"file_id": fileID})
+	savePath := filepath.Join(p.filesDir, sanitizeFilename(filename))
+	httpResp, err := p.httpClient.Get(parsed.Data.URL)
 	if err != nil {
-		log.Printf("[qq] get_file %s: %v", fileID, err)
 		return ""
 	}
-	rawStr, _ := raw.(string)
-	var resp struct {
-		Data *struct {
-			File     string `json:"file"`
-			FileName string `json:"file_name"`
-			FileSize int64  `json:"file_size"`
-			Base64   string `json:"base64"`
-			URL      string `json:"url"`
-		} `json:"data"`
-	}
-	if json.Unmarshal([]byte(rawStr), &resp) != nil || resp.Data == nil {
-		log.Printf("[qq] get_file %s: bad response (NapCat returned no data, fileID=%q url=%q)", fileID, fileID, fileURL)
+	defer httpResp.Body.Close()
+	data, err := io.ReadAll(httpResp.Body)
+	if err != nil || len(data) == 0 {
 		return ""
 	}
-	info := resp.Data
+	os.WriteFile(savePath, data, 0644)
+	return savePath
+}
 
+func (p *Plugin) downloadURL(fileURL, filename string) string {
+	if p.filesDir == "" {
+		return ""
+	}
+	os.MkdirAll(p.filesDir, 0755)
 	if filename == "" {
-		filename = info.FileName
+		filename = "file_" + filepath.Base(fileURL)
 	}
-	if filename == "" {
-		filename = "file_" + fileID
+	savePath := filepath.Join(p.filesDir, sanitizeFilename(filename))
+	dlResp, err := p.httpClient.Get(fileURL)
+	if err != nil {
+		return ""
 	}
-	filename = sanitizeFilename(filename)
-	localPath := filepath.Join(p.filesDir, filename)
-
-	// 优先 base64
-	if info.Base64 != "" {
-		data, err := base64.StdEncoding.DecodeString(info.Base64)
-		if err == nil {
-			os.WriteFile(localPath, data, 0644)
-			return localPath
-		}
+	defer dlResp.Body.Close()
+	data, err := io.ReadAll(dlResp.Body)
+	if err != nil || len(data) == 0 {
+		return ""
 	}
-
-	// 其次 URL 下载
-	if info.URL != "" {
-		dlResp, err := p.httpClient.Get(info.URL)
-		if err == nil {
-			defer dlResp.Body.Close()
-			data, err := io.ReadAll(dlResp.Body)
-			if err == nil {
-				os.WriteFile(localPath, data, 0644)
-				return localPath
-			}
-		}
-	}
-
-	// 尝试直接读取 file 路径
-	if info.File != "" {
-		src, err := os.ReadFile(info.File)
-		if err == nil {
-			os.WriteFile(localPath, src, 0644)
-			return localPath
-		}
-	}
-
-	return ""
+	os.WriteFile(savePath, data, 0644)
+	return savePath
 }
 
 func sanitizeFilename(name string) string {
@@ -2003,9 +1927,6 @@ func convInt64(v interface{}) (int64, error) {
 func NewPlugin(name string, config map[string]interface{}) (sdk.Plugin, error) {
 	return &Plugin{
 		name:           name,
-		nextID:         1,
-		messages:       make([]*SavedMessage, 0, maxMessages),
-		groupNameCache: make(map[int64]string),
 		allowFrom:      make(map[int64]struct{}),
 		groupAllowFrom: make(map[int64]struct{}),
 		dmPolicy:       "open",
