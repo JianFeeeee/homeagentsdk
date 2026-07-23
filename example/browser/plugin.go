@@ -31,7 +31,6 @@ type Plugin struct {
 	mu      sync.RWMutex
 	timeout int
 	proxy   string
-	dataDir string
 	client  *http.Client
 
 	sessions map[string]*BrowserSession
@@ -175,11 +174,6 @@ func (p *Plugin) Start(s *sdk.PluginSDK) error {
 		DisplayName: "HTTP 代理", Description: "HTTP 代理地址，如 http://proxy:port",
 		Category: "browser",
 	})
-	s.Settings().RegisterDef(sdk.ConfigDef{
-		Key: "data_dir", Default: "", Type: "string",
-		DisplayName: "浏览器数据目录", Description: "Chromium 用户数据目录路径（持久化 cookies/登录状态）。留空则每次启动临时目录。",
-		Category: "browser",
-	})
 
 	t := readCfg(s.Settings(), "timeout", float64(30))
 	p.timeout = int(t)
@@ -190,10 +184,6 @@ func (p *Plugin) Start(s *sdk.PluginSDK) error {
 		p.timeout = 120
 	}
 	p.proxy = readCfg(s.Settings(), "proxy", "")
-	p.dataDir = readCfg(s.Settings(), "data_dir", "")
-	if p.dataDir != "" {
-		os.MkdirAll(p.dataDir, 0700)
-	}
 	p.client = newHTTPClient(p.timeout, p.proxy)
 
 	tp := p.name + "_"
@@ -213,12 +203,13 @@ func (p *Plugin) Start(s *sdk.PluginSDK) error {
 
 	s.RegisterTool(tp+"fetch", sdk.ToolDef{
 		Name:        tp + "fetch",
-		Description: "快速抓取 URL 内容(quick 模式)。纯 HTTP 请求，不支持 JS 渲染，有 SSRF 防护。",
+		Description: "抓取 URL 内容。mode=auto 时遇 403/429 自动降级用无头 Chromium 渲染；mode=render 强制用 Chromium；mode=quick 纯 HTTP 不降级。",
 		Parameters: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
 				"url":       map[string]interface{}{"type": "string", "description": "HTTP/HTTPS URL"},
 				"max_chars": map[string]interface{}{"type": "integer", "description": "最大返回字符数(默认20000)"},
+				"mode":      map[string]interface{}{"type": "string", "description": "auto(默认)/render(强制Chromium)/quick(纯HTTP)"},
 			},
 			"required": []string{"url"},
 		},
@@ -581,14 +572,26 @@ func (p *Plugin) handleFetch(args map[string]interface{}) (interface{}, error) {
 	if err := p.ssrfCheck(rawURL); err != nil {
 		return errResult(err.Error()), nil
 	}
+
+	mode := readArg(args, "mode", "auto")
+	if mode == "render" {
+		return p.fetchWithChromium(rawURL, maxChars)
+	}
+
 	req, _ := http.NewRequest("GET", rawURL, nil)
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+	req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
 	resp, err := p.client.Do(req)
 	if err != nil {
 		return errResult("fetch failed: " + err.Error()), nil
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 400 {
+		resp.Body.Close()
+		if (resp.StatusCode == 403 || resp.StatusCode == 429) && mode == "auto" {
+			return p.fetchWithChromium(rawURL, maxChars)
+		}
 		return errResult(fmt.Sprintf("HTTP %d: %s", resp.StatusCode, resp.Status)), nil
 	}
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, int64(maxChars)+50000))
@@ -624,6 +627,27 @@ func (p *Plugin) handleFetch(args map[string]interface{}) (interface{}, error) {
 }
 
 // ── Chromium Render (normal) ──────────────────────────────
+
+func (p *Plugin) fetchWithChromium(rawURL string, maxChars int) (interface{}, error) {
+	chromiumPath := "/usr/local/bin/chromium"
+	if _, err := os.Stat(chromiumPath); err != nil {
+		return errResult("HTTP 403 且 Chromium 不可用，无法降级渲染"), nil
+	}
+	var out bytes.Buffer
+	cmd := exec.Command(chromiumPath, "--headless", "--disable-gpu", "--no-sandbox", "--dump-dom", rawURL)
+	cmd.Stdout = &out
+	if err := cmd.Run(); err != nil {
+		return errResult("Chromium 渲染失败: " + err.Error()), nil
+	}
+	text := htmlToText(out.String())
+	if len(text) > maxChars {
+		text = text[:maxChars] + "\n\n[Content truncated]"
+	}
+	return map[string]interface{}{
+		"content": text,
+		"details": map[string]interface{}{"url": rawURL, "mode": "render_fallback", "content_type": "text/html"},
+	}, nil
+}
 
 func (p *Plugin) handleRender(args map[string]interface{}) (interface{}, error) {
 	rawURL := readArg(args, "url", "")
@@ -689,15 +713,19 @@ func (p *Plugin) handleBrowserStart(args map[string]interface{}) (interface{}, e
 		chromedp.Flag("no-sandbox", true),
 		chromedp.WindowSize(1280, 800),
 	)
-	if p.dataDir != "" {
-		opts = append(opts, chromedp.Flag("user-data-dir", p.dataDir))
-	}
 	if p.proxy != "" {
 		opts = append(opts, chromedp.Flag("proxy-server", p.proxy))
 	}
 
 	allocCtx, cancel := chromedp.NewExecAllocator(context.Background(), opts...)
 	ctx, _ := chromedp.NewContext(allocCtx)
+
+	// 立即分配浏览器和 Target，确保后续 Run 的 timeout context 不会杀死浏览器进程
+	// chromedp 官方警告：首调用带 timeout 的 Run 会杀死整个浏览器
+	if err := chromedp.Run(ctx); err != nil {
+		cancel()
+		return errResult("browser init failed: " + err.Error()), nil
+	}
 
 	session := &BrowserSession{
 		allocCtx:  allocCtx,
@@ -760,9 +788,7 @@ func (p *Plugin) handleNavigate(args map[string]interface{}) (interface{}, error
 		return errResult(err.Error()), nil
 	}
 	waitSec := int64(readArg(args, "wait", float64(2)))
-	ctx, cancel := context.WithTimeout(s.ctx, time.Duration(p.timeout+10)*time.Second)
-	defer cancel()
-	if err := chromedp.Run(ctx,
+	if err := chromedp.Run(s.ctx,
 		chromedp.Navigate(rawURL),
 		chromedp.WaitReady("body"),
 		chromedp.Sleep(time.Duration(waitSec)*time.Second),
@@ -853,10 +879,7 @@ func (p *Plugin) handleClick(args map[string]interface{}) (interface{}, error) {
 	if err != nil {
 		return errResult(err.Error()), nil
 	}
-	waitMs := int64(readArg(args, "wait", float64(3000)))
-	ctx, cancel := context.WithTimeout(s.ctx, time.Duration(waitMs)*time.Millisecond)
-	defer cancel()
-	if err := chromedp.Run(ctx,
+	if err := chromedp.Run(s.ctx,
 		chromedp.WaitVisible(selector),
 		chromedp.Click(selector),
 	); err != nil {
@@ -876,9 +899,6 @@ func (p *Plugin) handleType(args map[string]interface{}) (interface{}, error) {
 	if err != nil {
 		return errResult(err.Error()), nil
 	}
-	waitMs := int64(readArg(args, "wait", float64(3000)))
-	ctx, cancel := context.WithTimeout(s.ctx, time.Duration(waitMs)*time.Millisecond)
-	defer cancel()
 	actions := []chromedp.Action{
 		chromedp.WaitVisible(selector),
 		chromedp.Click(selector, chromedp.NodeVisible),
@@ -892,7 +912,7 @@ func (p *Plugin) handleType(args map[string]interface{}) (interface{}, error) {
 	if submit {
 		actions = append(actions, chromedp.SendKeys(selector, "\r"))
 	}
-	if err := chromedp.Run(ctx, actions...); err != nil {
+	if err := chromedp.Run(s.ctx, actions...); err != nil {
 		return errResult("type failed (element may not exist or page blocking): " + err.Error()), nil
 	}
 	return map[string]interface{}{"status": "ok", "selector": selector}, nil
