@@ -194,6 +194,12 @@ type 枚举: text（文字）/ voice（语音转文字后发送）/ image（图�
 		},
 	}, p.handleGetFriends)
 
+	p.regTool(s, tp+"get_recent_contacts", "查看最近有消息的联系人和群聊，返回最近消息概览（含消息数、最后一条消息内容）。可用于发现有谁发过消息但未处理。", map[string]interface{}{
+		"type": "object", "properties": map[string]interface{}{
+			"count": map[string]interface{}{"type": "integer", "description": "获取数量，默认10"},
+		},
+	}, p.handleGetRecentContacts)
+
 	p.regTool(s, tp+"resolve_name", "将QQ号或群号解析为可读的用户昵称或群名称", map[string]interface{}{
 		"type": "object", "properties": map[string]interface{}{
 			"user_id": map[string]interface{}{"type": "integer", "description": "QQ号（与group_id二选一）"},
@@ -257,11 +263,12 @@ type 枚举: text（文字）/ voice（语音转文字后发送）/ image（图�
 		},
 	}, p.handleGetGroupFiles)
 
-	p.regTool(s, tp+"download_file", "从聊天记录下载文件到本地。file_id 从 qq_get_message/qq_get_history 的 files 字段获取。qq_get_message 还会返回 url（若可用），提供 url 可绕过 NapCat 缓存直接下载。群文件建议提供 group_id。下载成功返回本地路径。", map[string]interface{}{
+	p.regTool(s, tp+"download_file", "从聊天记录下载文件到本地。file_id 从 qq_get_message/qq_get_history 的 files 字段获取。群文件建议提供 group_id，私聊文件建议提供 user_id 以提高成功率。异步下载，完成后推送通知。", map[string]interface{}{
 		"type": "object", "properties": map[string]interface{}{
 			"file_id":  map[string]interface{}{"type": "string", "description": "文件 ID（从 qq_get_message 或 qq_get_history 的 files 字段获取）"},
-			"url":      map[string]interface{}{"type": "string", "description": "文件下载 URL（可选，qq_get_message 返回的 url 字段，用于绕过 NapCat 缓存直接下载）"},
-			"group_id": map[string]interface{}{"type": "integer", "description": "群号（可选，群文件下载时提供可提高成功率）"},
+			"url":      map[string]interface{}{"type": "string", "description": "文件下载 URL（可选，qq_get_message 返回的 url 字段）"},
+			"group_id": map[string]interface{}{"type": "integer", "description": "群号（可选，群文件下载）"},
+			"user_id":  map[string]interface{}{"type": "integer", "description": "私聊对象QQ号（可选，私聊文件下载）"},
 			"filename": map[string]interface{}{"type": "string", "description": "保存文件名（可选，默认用原文件名）"},
 		}, "required": []string{"file_id"},
 	}, p.handleDownloadFile)
@@ -784,6 +791,15 @@ func (p *Plugin) handleGetMessage(args map[string]interface{}) (interface{}, err
 		result["files"] = files
 	}
 
+	// 异步标记已读
+	go func() {
+		if d.MessageType == "group" && d.GroupID > 0 {
+			p.napcat("mark_group_msg_as_read", map[string]interface{}{"group_id": d.GroupID})
+		} else if d.UserID > 0 {
+			p.napcat("mark_private_msg_as_read", map[string]interface{}{"user_id": d.UserID})
+		}
+	}()
+
 	return result, nil
 }
 
@@ -1133,6 +1149,14 @@ func (p *Plugin) handleGetFriends(args map[string]interface{}) (interface{}, err
 	return p.napcat("get_friend_list", map[string]interface{}{})
 }
 
+func (p *Plugin) handleGetRecentContacts(args map[string]interface{}) (interface{}, error) {
+	count := 10
+	if c, err := convInt64(args["count"]); err == nil && c > 0 {
+		count = int(c)
+	}
+	return p.napcat("get_recent_contact", map[string]interface{}{"count": count})
+}
+
 func (p *Plugin) handleResolveName(args map[string]interface{}) (interface{}, error) {
 	if uid, err := convInt64(args["user_id"]); err == nil {
 		return p.napcat("get_stranger_info", map[string]interface{}{"user_id": uid, "no_cache": true})
@@ -1462,28 +1486,43 @@ func (p *Plugin) handleDownloadFile(args map[string]interface{}) (interface{}, e
 	fileURL, _ := args["url"].(string)
 	filename, _ := args["filename"].(string)
 	groupID, _ := convInt64(args["group_id"])
+	userID, _ := convInt64(args["user_id"])
 
-	// 1. 有 URL 时直接下载（绕过 NapCat 缓存，用于私聊文件）
-	if fileURL != "" {
-		savePath := p.downloadURL(fileURL, filename)
-		if savePath != "" {
-			return map[string]interface{}{
-				"status": "ok", "path": savePath, "filename": filepath.Base(savePath),
-			}, nil
+	dispName := filename
+	if dispName == "" {
+		dispName = fileID
+		if len(dispName) > 16 {
+			dispName = dispName[:16] + "…"
 		}
 	}
 
-	// 2. 群文件：用 get_group_file_url 获取新鲜下载链接
-	if groupID > 0 {
-		savePath := p.downloadGroupFile(groupID, fileID, filename)
-		if savePath != "" {
-			return map[string]interface{}{
-				"status": "ok", "path": savePath, "filename": filepath.Base(savePath),
-			}, nil
+	go func() {
+		savePath := ""
+		if fileURL != "" {
+			savePath = p.downloadURL(fileURL, filename)
 		}
-	}
+		if savePath == "" && groupID > 0 {
+			savePath = p.downloadGroupFile(groupID, fileID, filename)
+		}
+		if savePath == "" && userID > 0 {
+			savePath = p.downloadPrivateFile(userID, fileID, filename)
+		}
+		if savePath == "" {
+			savePath = p.downloadFromNapCat(fileID, filename)
+		}
+		if savePath != "" {
+			log.Printf("[qq] 文件下载完成: %s", savePath)
+			if p.sdk != nil {
+				p.sdk.InjectInterruptText(p.name, p.name,
+					fmt.Sprintf("文件下载完成: %s，保存在 %s", filepath.Base(savePath), savePath))
+			}
+		} else {
+			log.Printf("[qq] 文件下载失败: %s", fileID)
+		}
+	}()
 
-	return map[string]interface{}{"error": "下载失败，文件可能已过期。请尝试用 qq_get_message 重新获取消息（可能包含新的下载 URL），或让发送者重新发送文件"}, nil
+	return map[string]interface{}{"status": "started", "file_id": fileID, "filename": dispName,
+		"hint": "下载已后台启动，完成后会推送通知。若长时间未收到完成通知表示文件已过期无法下载，需让发送者重新发送"}, nil
 }
 
 func (p *Plugin) handleUploadGroupFile(args map[string]interface{}) (interface{}, error) {
@@ -1630,6 +1669,75 @@ func (p *Plugin) downloadGroupFile(groupID int64, fileID, filename string) strin
 	}
 	os.WriteFile(savePath, data, 0644)
 	return savePath
+}
+
+func (p *Plugin) downloadPrivateFile(userID int64, fileID, filename string) string {
+	resp, err := p.napcat("get_private_file_url", map[string]interface{}{"user_id": userID, "file_id": fileID})
+	if err != nil {
+		return ""
+	}
+	respStr, _ := rawString(resp)
+	if respStr == "" {
+		return ""
+	}
+	var parsed struct {
+		Data *struct {
+			URL string `json:"url"`
+		} `json:"data"`
+	}
+	if json.Unmarshal([]byte(respStr), &parsed) != nil || parsed.Data == nil || parsed.Data.URL == "" {
+		return ""
+	}
+	return p.downloadURL(parsed.Data.URL, filename)
+}
+
+func (p *Plugin) downloadFromNapCat(fileID, filename string) string {
+	if p.filesDir == "" || fileID == "" {
+		return ""
+	}
+	os.MkdirAll(p.filesDir, 0755)
+	raw, err := p.napcat("get_file", map[string]interface{}{"file_id": fileID})
+	if err != nil {
+		return ""
+	}
+	rawStr, _ := rawString(raw)
+	if rawStr == "" {
+		return ""
+	}
+	var resp struct {
+		Data *struct {
+			File     string `json:"file"`
+			FileName string `json:"file_name"`
+			FileSize int64  `json:"file_size"`
+			Base64   string `json:"base64"`
+			URL      string `json:"url"`
+		} `json:"data"`
+	}
+	if json.Unmarshal([]byte(rawStr), &resp) != nil || resp.Data == nil {
+		return ""
+	}
+	info := resp.Data
+	if info.FileName != "" {
+		filename = info.FileName
+	}
+	if info.Base64 != "" {
+		data, err := base64.StdEncoding.DecodeString(info.Base64)
+		if err == nil {
+			savePath := filepath.Join(p.filesDir, sanitizeFilename(filename))
+			os.WriteFile(savePath, data, 0644)
+			return savePath
+		}
+	}
+	if info.URL != "" {
+		return p.downloadURL(info.URL, filename)
+	}
+	if info.File != "" {
+		savePath := filepath.Join(p.filesDir, sanitizeFilename(filename))
+		if err := os.WriteFile(savePath, []byte(info.File), 0644); err == nil {
+			return savePath
+		}
+	}
+	return ""
 }
 
 func (p *Plugin) downloadURL(fileURL, filename string) string {
