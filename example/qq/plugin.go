@@ -17,7 +17,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-
+	"sync"
 	"time"
 
 	"gitcode.com/JianFeeeee/homeagent-sdk/sdk"
@@ -74,6 +74,15 @@ func rconPacket(id, typ int32, body string) []byte {
 	return pkt
 }
 
+type DownloadTask struct {
+	FileID    string `json:"file_id"`
+	Filename  string `json:"filename"`
+	Status    string `json:"status"`
+	Path      string `json:"path,omitempty"`
+	Error     string `json:"error,omitempty"`
+	CreatedAt string `json:"created_at"`
+}
+
 type Plugin struct {
 	name           string
 	sdk            *sdk.PluginSDK
@@ -91,6 +100,8 @@ type Plugin struct {
 	groupAllowFrom map[int64]struct{}
 	srv            *http.Server
 	agentfsDir     string
+	downloadMu     sync.Mutex
+	downloadTasks  []*DownloadTask
 }
 
 func (p *Plugin) Name() string { return p.name }
@@ -272,6 +283,10 @@ type 枚举: text（文字）/ voice（语音转文字后发送）/ image（图�
 			"filename": map[string]interface{}{"type": "string", "description": "保存文件名（可选，默认用原文件名）"},
 		}, "required": []string{"file_id"},
 	}, p.handleDownloadFile)
+
+	p.regTool(s, tp+"get_download_tasks", "查看所有下载任务及状态（running/done/failed），包含文件名、保存路径、错误信息等", map[string]interface{}{
+		"type": "object", "properties": map[string]interface{}{},
+	}, p.handleGetDownloadTasks)
 
 	p.regTool(s, tp+"upload_group_file", "上传文件到QQ群（通过base64编码发送，同时出现在群消息和群文件柜）", map[string]interface{}{
 		"type": "object", "properties": map[string]interface{}{
@@ -1478,6 +1493,25 @@ func (p *Plugin) handleGetGroupFiles(args map[string]interface{}) (interface{}, 
 	}
 }
 
+func (p *Plugin) addDownloadTask(fileID, filename string) *DownloadTask {
+	p.downloadMu.Lock()
+	defer p.downloadMu.Unlock()
+	t := &DownloadTask{FileID: fileID, Filename: filename, Status: "running", CreatedAt: time.Now().Format("15:04:05")}
+	p.downloadTasks = append(p.downloadTasks, t)
+	if len(p.downloadTasks) > 100 {
+		p.downloadTasks = p.downloadTasks[len(p.downloadTasks)-100:]
+	}
+	return t
+}
+
+func (p *Plugin) updateDownloadTask(t *DownloadTask, status, path, errMsg string) {
+	p.downloadMu.Lock()
+	defer p.downloadMu.Unlock()
+	t.Status = status
+	t.Path = path
+	t.Error = errMsg
+}
+
 func (p *Plugin) handleDownloadFile(args map[string]interface{}) (interface{}, error) {
 	fileID, _ := args["file_id"].(string)
 	if fileID == "" {
@@ -1488,41 +1522,53 @@ func (p *Plugin) handleDownloadFile(args map[string]interface{}) (interface{}, e
 	groupID, _ := convInt64(args["group_id"])
 	userID, _ := convInt64(args["user_id"])
 
-	dispName := filename
-	if dispName == "" {
-		dispName = fileID
-		if len(dispName) > 16 {
-			dispName = dispName[:16] + "…"
-		}
-	}
+	task := p.addDownloadTask(fileID, filename)
 
-	go func() {
+	go func(t *DownloadTask, fid, fname, furl string, gid, uid int64) {
 		savePath := ""
-		if fileURL != "" {
-			savePath = p.downloadURL(fileURL, filename)
+		errMsg := ""
+		if furl != "" {
+			savePath = p.downloadURL(furl, fname)
 		}
-		if savePath == "" && groupID > 0 {
-			savePath = p.downloadGroupFile(groupID, fileID, filename)
+		if savePath == "" && gid > 0 {
+			savePath = p.downloadGroupFile(gid, fid, fname)
 		}
-		if savePath == "" && userID > 0 {
-			savePath = p.downloadPrivateFile(userID, fileID, filename)
+		if savePath == "" && uid > 0 {
+			savePath = p.downloadPrivateFile(uid, fid, fname)
 		}
 		if savePath == "" {
-			savePath = p.downloadFromNapCat(fileID, filename)
+			savePath = p.downloadFromNapCat(fid, fname)
 		}
 		if savePath != "" {
+			p.updateDownloadTask(t, "done", savePath, "")
 			log.Printf("[qq] 文件下载完成: %s", savePath)
 			if p.sdk != nil {
 				p.sdk.InjectInterruptText(p.name, p.name,
 					fmt.Sprintf("文件下载完成: %s，保存在 %s", filepath.Base(savePath), savePath))
 			}
 		} else {
-			log.Printf("[qq] 文件下载失败: %s", fileID)
+			errMsg = "下载失败，文件可能已过期"
+			p.updateDownloadTask(t, "failed", "", errMsg)
+			log.Printf("[qq] 文件下载失败: %s", fid)
 		}
-	}()
+	}(task, fileID, filename, fileURL, groupID, userID)
 
-	return map[string]interface{}{"status": "started", "file_id": fileID, "filename": dispName,
-		"hint": "下载已后台启动，完成后会推送通知。若长时间未收到完成通知表示文件已过期无法下载，需让发送者重新发送"}, nil
+	return map[string]interface{}{
+		"status": "started", "file_id": fileID, "filename": filename,
+		"hint": "下载已后台启动。使用 qq_get_download_tasks 查看进度。"}, nil
+}
+
+func (p *Plugin) handleGetDownloadTasks(args map[string]interface{}) (interface{}, error) {
+	p.downloadMu.Lock()
+	defer p.downloadMu.Unlock()
+	// 返回最近 50 条
+	tasks := p.downloadTasks
+	if len(tasks) > 50 {
+		tasks = tasks[len(tasks)-50:]
+	}
+	return map[string]interface{}{
+		"tasks": tasks, "total": len(p.downloadTasks),
+		"hint": "status 为 running 表示下载中，done 已完成，failed 已失败。用 qq_download_file 重新下载失败的任务。"}, nil
 }
 
 func (p *Plugin) handleUploadGroupFile(args map[string]interface{}) (interface{}, error) {
@@ -2037,6 +2083,7 @@ func NewPlugin(name string, config map[string]interface{}) (sdk.Plugin, error) {
 		name:           name,
 		allowFrom:      make(map[int64]struct{}),
 		groupAllowFrom: make(map[int64]struct{}),
+		downloadTasks:  make([]*DownloadTask, 0),
 		dmPolicy:       "open",
 		groupPolicy:    "open",
 	}, nil
