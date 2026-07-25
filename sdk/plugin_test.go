@@ -177,3 +177,77 @@ func TestRegisterStageOwnToolsNilRegStage(t *testing.T) {
 	s := &PluginSDK{name: "test"}
 	s.RegisterStage(StageBeforeToolcall, func(ctx *StageContext) error { return nil }, StageScopeOwnTools)
 }
+
+func TestToolDefCleaner(t *testing.T) {
+	called := false
+	def := ToolDef{
+		Name:        "test_clean",
+		Description: "A test tool with cleaner",
+		Parameters:  map[string]interface{}{"type": "object", "properties": map[string]interface{}{}},
+		Cleaner: func(output string) string {
+			called = true
+			return "cleaned:" + output
+		},
+	}
+	if def.Cleaner == nil {
+		t.Fatal("Cleaner should not be nil")
+	}
+	result := def.Cleaner("raw output")
+	if !called {
+		t.Error("Cleaner was not called")
+	}
+	if result != "cleaned:raw output" {
+		t.Errorf("expected 'cleaned:raw output', got '%s'", result)
+	}
+}
+
+func TestToolDefNoMemory(t *testing.T) {
+	def := ToolDef{
+		Name:        "test_nomem",
+		Description: "A test tool with NoMemory",
+		Parameters:  map[string]interface{}{"type": "object", "properties": map[string]interface{}{}},
+		NoMemory:    true,
+	}
+	if !def.NoMemory {
+		t.Error("NoMemory should be true")
+	}
+	if def.Cleaner != nil {
+		t.Error("Cleaner should be nil when not set")
+	}
+}
+
+func TestToolDefNoMemoryDefaultFalse(t *testing.T) {
+	def := ToolDef{
+		Name:        "test_default",
+		Description: "A test tool with defaults",
+		Parameters:  map[string]interface{}{"type": "object", "properties": map[string]interface{}{}},
+	}
+	if def.NoMemory {
+		t.Error("NoMemory should default to false")
+	}
+}
+
+func TestToolDefRegisterPreservesNoMemory(t *testing.T) {
+	var capturedDef ToolDef
+	regTool := func(name string, def ToolDef, handler ToolHandler) error {
+		capturedDef = def
+		return nil
+	}
+	s := &PluginSDK{regTool: regTool, name: "test"}
+	def := ToolDef{
+		Name:        "test_tool",
+		Description: "test desc",
+		Parameters:  map[string]interface{}{"type": "object", "properties": map[string]interface{}{}},
+		NoMemory:    true,
+		Cleaner:     func(s string) string { return s },
+	}
+	s.RegisterTool("test_tool", def, func(args map[string]interface{}) (interface{}, error) {
+		return nil, nil
+	})
+	if !capturedDef.NoMemory {
+		t.Error("NoMemory should be preserved through RegisterTool")
+	}
+	if capturedDef.Cleaner == nil {
+		t.Error("Cleaner should be preserved through RegisterTool")
+	}
+}

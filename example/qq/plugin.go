@@ -167,155 +167,242 @@ meta JSON 格式：
 type 枚举: text（文字）/ voice（语音转文字后发送）/ image（图片URL）/ file（文件URL）`,
 		p.handleChannelOutput)
 
+	// 查询类工具输出清洗器：提取 JSON 中的 content/文本字段参与向量化
+	cleaner := func(output string) string {
+		var r struct{ Content string }
+		if json.Unmarshal([]byte(output), &r) == nil && r.Content != "" {
+			return r.Content
+		}
+		return output
+	}
+
 	// ---- 消息 ----
-	p.regTool(s, tp+"get_message", botInfo+"通过 message_id 从 NapCat 实时获取消息正文、发送者、附件等信息。message_id 从中断消息的 message_id=N 获取，或从 reply_to 的 message_id 获取。", map[string]interface{}{
-		"type": "object", "properties": map[string]interface{}{
-			"message_id": map[string]interface{}{"type": "integer", "description": "NapCat消息ID（从中断消息的 message_id=N 或 reply_to.message_id 获取）"},
-		}, "required": []string{"message_id"},
+	p.regTool(s, sdk.ToolDef{
+		Name: tp + "get_message", Description: botInfo + "通过 message_id 从 NapCat 实时获取消息正文、发送者、附件等信息。message_id 从中断消息的 message_id=N 获取，或从 reply_to 的 message_id 获取。",
+		NoMemory: false,
+		Cleaner:  cleaner,
+		Parameters: map[string]interface{}{
+			"type": "object", "properties": map[string]interface{}{
+				"message_id": map[string]interface{}{"type": "integer", "description": "NapCat消息ID（从中断消息的 message_id=N 或 reply_to.message_id 获取）"},
+			}, "required": []string{"message_id"},
+		},
 	}, p.handleGetMessage)
 
-	p.regTool(s, tp+"send_file", "发送文件/图片到QQ（私聊或群聊）。文件先复制到remote目录供NapCat容器访问。", map[string]interface{}{
-		"type": "object", "properties": map[string]interface{}{
-			"group_id": map[string]interface{}{"type": "integer", "description": "目标群号（与user_id二选一）"},
-			"user_id":  map[string]interface{}{"type": "integer", "description": "目标QQ号（与group_id二选一）"},
-			"file":     map[string]interface{}{"type": "string", "description": "本地文件路径"},
-			"name":     map[string]interface{}{"type": "string", "description": "文件名（可选，默认取原文件名）"},
-			"as_image": map[string]interface{}{"type": "boolean", "description": "作为图片发送（true）还是作为文件（false，默认）"},
+	p.regTool(s, sdk.ToolDef{
+		Name: tp + "send_file", Description: "发送文件/图片到QQ（私聊或群聊）。文件先复制到remote目录供NapCat容器访问。",
+		Parameters: map[string]interface{}{
+			"type": "object", "properties": map[string]interface{}{
+				"group_id": map[string]interface{}{"type": "integer", "description": "目标群号（与user_id二选一）"},
+				"user_id":  map[string]interface{}{"type": "integer", "description": "目标QQ号（与group_id二选一）"},
+				"file":     map[string]interface{}{"type": "string", "description": "本地文件路径"},
+				"name":     map[string]interface{}{"type": "string", "description": "文件名（可选，默认取原文件名）"},
+				"as_image": map[string]interface{}{"type": "boolean", "description": "作为图片发送（true）还是作为文件（false，默认）"},
+			},
 		},
+		NoMemory: true,
 	}, p.handleSendFile)
 
-	p.regTool(s, tp+"get_history", "获取QQ群聊/私聊最近历史消息。当收到引用回复消息或需要了解对话上下文时应优先调用此工具查看前后文。返回值每条格式为 [时间] 发送者: 消息内容。如果消息包含文件，会额外返回 files 字段（含 file_id 和 name），可用 qq_download_file 工具下载。", map[string]interface{}{
-		"type": "object", "properties": map[string]interface{}{
-			"group_id": map[string]interface{}{"type": "integer", "description": "群号（与user_id二选一）"},
-			"user_id":  map[string]interface{}{"type": "integer", "description": "QQ号私聊历史（与group_id二选一）"},
-			"count":    map[string]interface{}{"type": "integer", "description": "拉取条数，默认10"},
-		}, "required": []string{},
+	p.regTool(s, sdk.ToolDef{
+		Name: tp + "get_history", Description: "获取QQ群聊/私聊最近历史消息。当收到引用回复消息或需要了解对话上下文时应优先调用此工具查看前后文。返回值每条格式为 [时间] 发送者: 消息内容。如果消息包含文件，会额外返回 files 字段（含 file_id 和 name），可用 qq_download_file 工具下载。",
+		NoMemory: false,
+		Cleaner:  cleaner,
+		Parameters: map[string]interface{}{
+			"type": "object", "properties": map[string]interface{}{
+				"group_id": map[string]interface{}{"type": "integer", "description": "群号（与user_id二选一）"},
+				"user_id":  map[string]interface{}{"type": "integer", "description": "QQ号私聊历史（与group_id二选一）"},
+				"count":    map[string]interface{}{"type": "integer", "description": "拉取条数，默认10"},
+			}, "required": []string{},
+		},
 	}, p.handleGetHistory)
 
 	// ---- 查询 ----
-	p.regTool(s, tp+"get_groups", "获取QQ群列表，可按关键词搜索群名", map[string]interface{}{
-		"type": "object", "properties": map[string]interface{}{
-			"keyword": map[string]interface{}{"type": "string", "description": "搜索关键词（可选）"},
+	p.regTool(s, sdk.ToolDef{
+		Name: tp + "get_groups", Description: "获取QQ群列表，可按关键词搜索群名",
+		NoMemory: false,
+		Parameters: map[string]interface{}{
+			"type": "object", "properties": map[string]interface{}{
+				"keyword": map[string]interface{}{"type": "string", "description": "搜索关键词（可选）"},
+			},
 		},
 	}, p.handleGetGroups)
 
-	p.regTool(s, tp+"get_friends", "获取QQ好友列表，可按昵称/备注关键词搜索", map[string]interface{}{
-		"type": "object", "properties": map[string]interface{}{
-			"keyword": map[string]interface{}{"type": "string", "description": "搜索关键词（可选）"},
+	p.regTool(s, sdk.ToolDef{
+		Name: tp + "get_friends", Description: "获取QQ好友列表，可按昵称/备注关键词搜索",
+		NoMemory: false,
+		Parameters: map[string]interface{}{
+			"type": "object", "properties": map[string]interface{}{
+				"keyword": map[string]interface{}{"type": "string", "description": "搜索关键词（可选）"},
+			},
 		},
 	}, p.handleGetFriends)
 
-	p.regTool(s, tp+"get_recent_contacts", "查看最近有消息的联系人和群聊，返回最近消息概览（含消息数、最后一条消息内容）。可用于发现有谁发过消息但未处理。", map[string]interface{}{
-		"type": "object", "properties": map[string]interface{}{
-			"count": map[string]interface{}{"type": "integer", "description": "获取数量，默认10"},
+	p.regTool(s, sdk.ToolDef{
+		Name: tp + "get_recent_contacts", Description: "查看最近有消息的联系人和群聊，返回最近消息概览（含消息数、最后一条消息内容）。可用于发现有谁发过消息但未处理。",
+		NoMemory: false,
+		Parameters: map[string]interface{}{
+			"type": "object", "properties": map[string]interface{}{
+				"count": map[string]interface{}{"type": "integer", "description": "获取数量，默认10"},
+			},
 		},
 	}, p.handleGetRecentContacts)
 
-	p.regTool(s, tp+"resolve_name", "将QQ号或群号解析为可读的用户昵称或群名称", map[string]interface{}{
-		"type": "object", "properties": map[string]interface{}{
-			"user_id": map[string]interface{}{"type": "integer", "description": "QQ号（与group_id二选一）"},
-			"group_id": map[string]interface{}{"type": "integer", "description": "群号（与user_id二选一）"},
+	p.regTool(s, sdk.ToolDef{
+		Name: tp + "resolve_name", Description: "将QQ号或群号解析为可读的用户昵称或群名称",
+		NoMemory: false,
+		Parameters: map[string]interface{}{
+			"type": "object", "properties": map[string]interface{}{
+				"user_id": map[string]interface{}{"type": "integer", "description": "QQ号（与group_id二选一）"},
+				"group_id": map[string]interface{}{"type": "integer", "description": "群号（与user_id二选一）"},
+			},
 		},
 	}, p.handleResolveName)
 
-	p.regTool(s, tp+"resolve_nickname", "按昵称/备注/群名片搜索QQ用户，返回匹配的QQ号和详细信息。支持搜索好友列表或指定群成员。", map[string]interface{}{
-		"type": "object", "properties": map[string]interface{}{
-			"keyword":  map[string]interface{}{"type": "string", "description": "搜索关键词（昵称/备注/群名片）"},
-			"group_id": map[string]interface{}{"type": "integer", "description": "所在群号（可选），不传则搜索好友列表"},
-		}, "required": []string{"keyword"},
+	p.regTool(s, sdk.ToolDef{
+		Name: tp + "resolve_nickname", Description: "按昵称/备注/群名片搜索QQ用户，返回匹配的QQ号和详细信息。支持搜索好友列表或指定群成员。",
+		NoMemory: false,
+		Parameters: map[string]interface{}{
+			"type": "object", "properties": map[string]interface{}{
+				"keyword":  map[string]interface{}{"type": "string", "description": "搜索关键词（昵称/备注/群名片）"},
+				"group_id": map[string]interface{}{"type": "integer", "description": "所在群号（可选），不传则搜索好友列表"},
+			}, "required": []string{"keyword"},
+		},
 	}, p.handleResolveNickname)
 
-	p.regTool(s, tp+"get_group_member_info", "获取QQ群成员详细信息", map[string]interface{}{
-		"type": "object", "properties": map[string]interface{}{
-			"group_id": map[string]interface{}{"type": "integer", "description": "群号"},
-			"user_id":  map[string]interface{}{"type": "integer", "description": "QQ号"},
-		}, "required": []string{"group_id", "user_id"},
+	p.regTool(s, sdk.ToolDef{
+		Name: tp + "get_group_member_info", Description: "获取QQ群成员详细信息",
+		NoMemory: false,
+		Parameters: map[string]interface{}{
+			"type": "object", "properties": map[string]interface{}{
+				"group_id": map[string]interface{}{"type": "integer", "description": "群号"},
+				"user_id":  map[string]interface{}{"type": "integer", "description": "QQ号"},
+			}, "required": []string{"group_id", "user_id"},
+		},
 	}, p.handleGetGroupMemberInfo)
 
 	// ---- 群管理 ----
-	p.regTool(s, tp+"group_manage", "QQ群综合管理。通过command参数执行各种操作：leave退群, kick踢人, ban禁言, unban解禁, rename改名, mute-all全员禁言, set-card设名片, set-admin设管理, set-title设头衔, member-list成员列表, group-info群详情, member-info成员详情, at-all-remain@全体剩余, msg-history消息历史, recall撤回, pin-msg精华, list-files文件列表, pending-requests待处理请求, folder-create创建文件夹。注意：leave/kick/ban/unban/mute-all/set-admin等破坏性操作必须先请示管理员确认后再执行。", map[string]interface{}{
-		"type": "object", "properties": map[string]interface{}{
-			"command":  map[string]interface{}{"type": "string", "description": "操作命令"},
-			"group_id": map[string]interface{}{"type": "integer", "description": "群号"},
-			"user_id":  map[string]interface{}{"type": "integer", "description": "QQ号（踢人/禁言/设名片等需要）"},
-			"message_id": map[string]interface{}{"type": "integer", "description": "消息ID（撤回/精华）"},
-			"name":     map[string]interface{}{"type": "string", "description": "群名称（rename）或文件夹名（folder-create）"},
-			"card":     map[string]interface{}{"type": "string", "description": "群名片（set-card）"},
-			"title":    map[string]interface{}{"type": "string", "description": "群头衔（set-title）"},
-			"enable":   map[string]interface{}{"type": "boolean", "description": "启用/禁用（set-admin/mute-all）"},
-			"minutes":  map[string]interface{}{"type": "integer", "description": "禁言分钟数（ban），0=解禁"},
-			"count":    map[string]interface{}{"type": "integer", "description": "消息条数（msg-history），默认10"},
-			"folder_id": map[string]interface{}{"type": "string", "description": "文件夹ID（list-files）"},
-			"reject_add": map[string]interface{}{"type": "boolean", "description": "踢出时拒绝加群（kick）"},
-			"confirm": map[string]interface{}{"type": "boolean", "description": "高风险操作确认标记。执行 leave/kick/ban/unban/rename/mute-all/set-card/set-admin/set-title/recall/pin-msg/folder-create 时必须传 true"},
+	p.regTool(s, sdk.ToolDef{
+		Name: tp + "group_manage", Description: "QQ群综合管理。通过command参数执行各种操作：leave退群, kick踢人, ban禁言, unban解禁, rename改名, mute-all全员禁言, set-card设名片, set-admin设管理, set-title设头衔, member-list成员列表, group-info群详情, member-info成员详情, at-all-remain@全体剩余, msg-history消息历史, recall撤回, pin-msg精华, list-files文件列表, pending-requests待处理请求, folder-create创建文件夹。注意：leave/kick/ban/unban/mute-all/set-admin等破坏性操作必须先请示管理员确认后再执行。",
+		Parameters: map[string]interface{}{
+			"type": "object", "properties": map[string]interface{}{
+				"command":  map[string]interface{}{"type": "string", "description": "操作命令"},
+				"group_id": map[string]interface{}{"type": "integer", "description": "群号"},
+				"user_id":  map[string]interface{}{"type": "integer", "description": "QQ号（踢人/禁言/设名片等需要）"},
+				"message_id": map[string]interface{}{"type": "integer", "description": "消息ID（撤回/精华）"},
+				"name":     map[string]interface{}{"type": "string", "description": "群名称（rename）或文件夹名（folder-create）"},
+				"card":     map[string]interface{}{"type": "string", "description": "群名片（set-card）"},
+				"title":    map[string]interface{}{"type": "string", "description": "群头衔（set-title）"},
+				"enable":   map[string]interface{}{"type": "boolean", "description": "启用/禁用（set-admin/mute-all）"},
+				"minutes":  map[string]interface{}{"type": "integer", "description": "禁言分钟数（ban），0=解禁"},
+				"count":    map[string]interface{}{"type": "integer", "description": "消息条数（msg-history），默认10"},
+				"folder_id": map[string]interface{}{"type": "string", "description": "文件夹ID（list-files）"},
+				"reject_add": map[string]interface{}{"type": "boolean", "description": "踢出时拒绝加群（kick）"},
+				"confirm": map[string]interface{}{"type": "boolean", "description": "高风险操作确认标记。执行 leave/kick/ban/unban/rename/mute-all/set-card/set-admin/set-title/recall/pin-msg/folder-create 时必须传 true"},
+			},
 		},
+		NoMemory: true,
 	}, p.handleGroupManage)
 
-	p.regTool(s, tp+"friend_action", "QQ好友管理：delete删除好友, block拉黑（删好友+从所有群踢出+拒绝加群）, approve-friend同意好友请求, reject-friend拒绝好友请求, list-friends列出好友。注意：涉及删除/拉黑的操作必须请示管理员确认后再执行，未经授权不可操作。", map[string]interface{}{
-		"type": "object", "properties": map[string]interface{}{
-			"command": map[string]interface{}{"type": "string", "description": "操作: delete|block|approve-friend|reject-friend|list-friends"},
-			"user_id": map[string]interface{}{"type": "integer", "description": "目标QQ号"},
-			"flag":    map[string]interface{}{"type": "string", "description": "好友请求flag（approve-friend/reject-friend需要）"},
-			"remark":  map[string]interface{}{"type": "string", "description": "好友备注（approve-friend可选）"},
-			"group_id": map[string]interface{}{"type": "integer", "description": "仅从指定群踢出（block配合）"},
-			"confirm": map[string]interface{}{"type": "boolean", "description": "高风险操作确认标记。执行 delete/block/approve-friend/reject-friend 时必须传 true"},
+	p.regTool(s, sdk.ToolDef{
+		Name: tp + "friend_action", Description: "QQ好友管理：delete删除好友, block拉黑（删好友+从所有群踢出+拒绝加群）, approve-friend同意好友请求, reject-friend拒绝好友请求, list-friends列出好友。注意：涉及删除/拉黑的操作必须请示管理员确认后再执行，未经授权不可操作。",
+		Parameters: map[string]interface{}{
+			"type": "object", "properties": map[string]interface{}{
+				"command": map[string]interface{}{"type": "string", "description": "操作: delete|block|approve-friend|reject-friend|list-friends"},
+				"user_id": map[string]interface{}{"type": "integer", "description": "目标QQ号"},
+				"flag":    map[string]interface{}{"type": "string", "description": "好友请求flag（approve-friend/reject-friend需要）"},
+				"remark":  map[string]interface{}{"type": "string", "description": "好友备注（approve-friend可选）"},
+				"group_id": map[string]interface{}{"type": "integer", "description": "仅从指定群踢出（block配合）"},
+				"confirm": map[string]interface{}{"type": "boolean", "description": "高风险操作确认标记。执行 delete/block/approve-friend/reject-friend 时必须传 true"},
+			},
 		},
+		NoMemory: true,
 	}, p.handleFriendAction)
 
 	// ---- 文件 ----
-	p.regTool(s, tp+"get_group_files", "查询群文件列表、搜索文件、下载文件到本地。操作: list列出, search搜索, download下载", map[string]interface{}{
-		"type": "object", "properties": map[string]interface{}{
-			"group_id": map[string]interface{}{"type": "integer", "description": "群号"},
-			"command":  map[string]interface{}{"type": "string", "description": "操作: list|search|download"},
-			"folder_id": map[string]interface{}{"type": "string", "description": "文件夹ID（list指定文件夹）"},
-			"keyword":  map[string]interface{}{"type": "string", "description": "搜索关键词（search）"},
-			"file_id":  map[string]interface{}{"type": "string", "description": "文件ID（download）"},
-			"filename": map[string]interface{}{"type": "string", "description": "保存文件名（download可选）"},
+	p.regTool(s, sdk.ToolDef{
+		Name: tp + "get_group_files", Description: "查询群文件列表、搜索文件、下载文件到本地。操作: list列出, search搜索, download下载",
+		NoMemory: false,
+		Cleaner:  cleaner,
+		Parameters: map[string]interface{}{
+			"type": "object", "properties": map[string]interface{}{
+				"group_id": map[string]interface{}{"type": "integer", "description": "群号"},
+				"command":  map[string]interface{}{"type": "string", "description": "操作: list|search|download"},
+				"folder_id": map[string]interface{}{"type": "string", "description": "文件夹ID（list指定文件夹）"},
+				"keyword":  map[string]interface{}{"type": "string", "description": "搜索关键词（search）"},
+				"file_id":  map[string]interface{}{"type": "string", "description": "文件ID（download）"},
+				"filename": map[string]interface{}{"type": "string", "description": "保存文件名（download可选）"},
+			},
 		},
 	}, p.handleGetGroupFiles)
 
-	p.regTool(s, tp+"download_file", "从聊天记录下载文件到本地。file_id 从 qq_get_message/qq_get_history 的 files 字段获取。群文件建议提供 group_id，私聊文件建议提供 user_id 以提高成功率。异步下载，完成后推送通知。", map[string]interface{}{
-		"type": "object", "properties": map[string]interface{}{
-			"file_id":  map[string]interface{}{"type": "string", "description": "文件 ID（从 qq_get_message 或 qq_get_history 的 files 字段获取）"},
-			"url":      map[string]interface{}{"type": "string", "description": "文件下载 URL（可选，qq_get_message 返回的 url 字段）"},
-			"group_id": map[string]interface{}{"type": "integer", "description": "群号（可选，群文件下载）"},
-			"user_id":  map[string]interface{}{"type": "integer", "description": "私聊对象QQ号（可选，私聊文件下载）"},
-			"filename": map[string]interface{}{"type": "string", "description": "保存文件名（可选，默认用原文件名）"},
-		}, "required": []string{"file_id"},
+	p.regTool(s, sdk.ToolDef{
+		Name: tp + "download_file", Description: "从聊天记录下载文件到本地。file_id 从 qq_get_message/qq_get_history 的 files 字段获取。群文件建议提供 group_id，私聊文件建议提供 user_id 以提高成功率。异步下载，完成后推送通知。",
+		Parameters: map[string]interface{}{
+			"type": "object", "properties": map[string]interface{}{
+				"file_id":  map[string]interface{}{"type": "string", "description": "文件 ID（从 qq_get_message 或 qq_get_history 的 files 字段获取）"},
+				"url":      map[string]interface{}{"type": "string", "description": "文件下载 URL（可选，qq_get_message 返回的 url 字段）"},
+				"group_id": map[string]interface{}{"type": "integer", "description": "群号（可选，群文件下载）"},
+				"user_id":  map[string]interface{}{"type": "integer", "description": "私聊对象QQ号（可选，私聊文件下载）"},
+				"filename": map[string]interface{}{"type": "string", "description": "保存文件名（可选，默认用原文件名）"},
+			}, "required": []string{"file_id"},
+		},
+		NoMemory: true,
 	}, p.handleDownloadFile)
 
-	p.regTool(s, tp+"get_download_tasks", "查看所有下载任务及状态（running/done/failed），包含文件名、保存路径、错误信息等", map[string]interface{}{
-		"type": "object", "properties": map[string]interface{}{},
+	p.regTool(s, sdk.ToolDef{
+		Name: tp + "get_download_tasks", Description: "查看所有下载任务及状态（running/done/failed），包含文件名、保存路径、错误信息等",
+		NoMemory: false,
+		Cleaner:  cleaner,
+		Parameters: map[string]interface{}{
+			"type": "object", "properties": map[string]interface{}{},
+		},
 	}, p.handleGetDownloadTasks)
 
-	p.regTool(s, tp+"upload_group_file", "上传文件到QQ群（通过base64编码发送，同时出现在群消息和群文件柜）", map[string]interface{}{
-		"type": "object", "properties": map[string]interface{}{
-			"group_id": map[string]interface{}{"type": "integer", "description": "目标群号"},
-			"file":     map[string]interface{}{"type": "string", "description": "本地文件路径"},
-			"name":     map[string]interface{}{"type": "string", "description": "文件名（可选，默认取原文件名）"},
-		}, "required": []string{"group_id", "file"},
+	p.regTool(s, sdk.ToolDef{
+		Name: tp + "upload_group_file", Description: "上传文件到QQ群（通过base64编码发送，同时出现在群消息和群文件柜）",
+		Parameters: map[string]interface{}{
+			"type": "object", "properties": map[string]interface{}{
+				"group_id": map[string]interface{}{"type": "integer", "description": "目标群号"},
+				"file":     map[string]interface{}{"type": "string", "description": "本地文件路径"},
+				"name":     map[string]interface{}{"type": "string", "description": "文件名（可选，默认取原文件名）"},
+			}, "required": []string{"group_id", "file"},
+		},
+		NoMemory: true,
 	}, p.handleUploadGroupFile)
 
 	// ---- 文档/视频/网页工具 ----
-	p.regTool(s, tp+"read_document", "读取文档内容文本。支持 PDF、DOCX、DOC、XLSX、XLS、PPTX、PPT、TXT、CSV、MD 格式。使用 libreoffice + pandoc 转换提取文本，返回前 20000 字符。适合处理用户发来的文档文件。", map[string]interface{}{
-		"type": "object", "properties": map[string]interface{}{
-			"path": map[string]interface{}{"type": "string", "description": "文档文件路径（已保存到本地的文件路径）"},
-		}, "required": []string{"path"},
+	p.regTool(s, sdk.ToolDef{
+		Name: tp + "read_document", Description: "读取文档内容文本。支持 PDF、DOCX、DOC、XLSX、XLS、PPTX、PPT、TXT、CSV、MD 格式。使用 libreoffice + pandoc 转换提取文本，返回前 20000 字符。适合处理用户发来的文档文件。",
+		NoMemory: false,
+		Cleaner:  cleaner,
+		Parameters: map[string]interface{}{
+			"type": "object", "properties": map[string]interface{}{
+				"path": map[string]interface{}{"type": "string", "description": "文档文件路径（已保存到本地的文件路径）"},
+			}, "required": []string{"path"},
+		},
 	}, p.handleReadDocument)
 
-	p.regTool(s, tp+"video_download", "下载视频到本地。支持 B站、YouTube 等主流视频网站（通过 yt-dlp）。先调用 info_only 查看视频信息，再下载。下载后文件保存在 agentfs 目录。", map[string]interface{}{
-		"type": "object", "properties": map[string]interface{}{
-			"url":       map[string]interface{}{"type": "string", "description": "视频分享链接"},
-			"info_only": map[string]interface{}{"type": "boolean", "description": "仅获取视频信息（标题、时长、清晰度列表），不下"},
-		}, "required": []string{"url"},
+	p.regTool(s, sdk.ToolDef{
+		Name: tp + "video_download", Description: "下载视频到本地。支持 B站、YouTube 等主流视频网站（通过 yt-dlp）。先调用 info_only 查看视频信息，再下载。下载后文件保存在 agentfs 目录。",
+		NoMemory: false,
+		Cleaner:  cleaner,
+		Parameters: map[string]interface{}{
+			"type": "object", "properties": map[string]interface{}{
+				"url":       map[string]interface{}{"type": "string", "description": "视频分享链接"},
+				"info_only": map[string]interface{}{"type": "boolean", "description": "仅获取视频信息（标题、时长、清晰度列表），不下"},
+			}, "required": []string{"url"},
+		},
 	}, p.handleVideoDownload)
 
 	// ---- 附加 ----
-	p.regTool(s, tp+"send_like", "给QQ好友点赞/戳一戳", map[string]interface{}{
-		"type": "object", "properties": map[string]interface{}{
-			"user_id": map[string]interface{}{"type": "integer", "description": "目标QQ号"},
-			"times":   map[string]interface{}{"type": "integer", "description": "点赞次数1-20，默认1"},
-		}, "required": []string{"user_id"},
+	p.regTool(s, sdk.ToolDef{
+		Name: tp + "send_like", Description: "给QQ好友点赞/戳一戳",
+		Parameters: map[string]interface{}{
+			"type": "object", "properties": map[string]interface{}{
+				"user_id": map[string]interface{}{"type": "integer", "description": "目标QQ号"},
+				"times":   map[string]interface{}{"type": "integer", "description": "点赞次数1-20，默认1"},
+			}, "required": []string{"user_id"},
+		},
+		NoMemory: true,
 	}, p.handleSendLike)
 
 	s.RegisterStage(sdk.StageBeforeToolcall, p.beforeOwnToolcall, sdk.StageScopeOwnTools)
@@ -347,8 +434,8 @@ func (p *Plugin) Stop() error {
 	return nil
 }
 
-func (p *Plugin) regTool(s *sdk.PluginSDK, name, desc string, params map[string]interface{}, handler sdk.ToolHandler) {
-	s.RegisterTool(name, sdk.ToolDef{Name: name, Description: desc, Parameters: params}, handler)
+func (p *Plugin) regTool(s *sdk.PluginSDK, def sdk.ToolDef, handler sdk.ToolHandler) {
+	s.RegisterTool(def.Name, def, handler)
 }
 
 // ======== Bot Identity ========
@@ -2078,7 +2165,7 @@ func convInt64(v interface{}) (int64, error) {
 	return 0, fmt.Errorf("cannot convert %T to int64", v)
 }
 
-func NewPlugin(name string, config map[string]interface{}) (sdk.Plugin, error) {
+func NewPluginFactory(name string, config map[string]interface{}) (sdk.Plugin, error) {
 	return &Plugin{
 		name:           name,
 		allowFrom:      make(map[int64]struct{}),

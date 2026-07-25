@@ -95,6 +95,20 @@ Triple 数据结构新增字段：
 - `SubjectType` — 主体类型
 - `ObjectType` — 客体类型
 
+### ToolDef 字段说明
+
+`RegisterTool` 的 `def` 参数类型为 `sdk.ToolDef`，包含以下字段：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `Name` | `string` | 工具名，建议插件名前缀避免冲突 |
+| `Description` | `string` | 工具描述，LLM 据此选择调用 |
+| `Parameters` | `map[string]interface{}` | JSON Schema 格式参数定义 |
+| `NoMemory` | `bool` | 默认为 `false`；设为 `true` 时输出不参与向量/jieba/蒸馏计算（原文保留） |
+| `Cleaner` | `func(string) string` | 可选，输出进入计算层前的清洗函数（如 JSON 提取 `.content`） |
+
+`NoMemory` 和 `Cleaner` 的详细设计意图参见核心仓 `docs/zh/PLUGIN_DEV.md`。
+
 ### New 构造函数
 
 `New()` 由内核在加载插件时调用，插件开发者无需手动构造 PluginSDK：

@@ -14,8 +14,9 @@ import (
 
 type BuildConfig struct {
 	OutDir  string
-	Targets []string // "linux/amd64", "windows/amd64", "lua"
+	Targets []string
 	Bundle  bool
+	SDKPath string
 }
 
 func cmdBuild(args []string) {
@@ -24,48 +25,43 @@ func cmdBuild(args []string) {
 		switch args[i] {
 		case "--outdir":
 			if i+1 < len(args) {
-				cfg.OutDir = args[i+1]
-				i++
+				cfg.OutDir = args[i+1]; i++
 			}
 		case "--target":
 			if i+1 < len(args) {
-				cfg.Targets = append(cfg.Targets, args[i+1])
-				i++
+				cfg.Targets = append(cfg.Targets, args[i+1]); i++
 			}
 		case "--bundle":
 			cfg.Bundle = true
+		case "--sdk-path":
+			if i+1 < len(args) {
+				cfg.SDKPath = args[i+1]; i++
+			}
 		}
 	}
 
-	// read plg.json
 	plg, err := readPlgJSON("plg.json")
 	if err != nil {
-		fmt.Printf("error: read plg.json: %v\n", err)
-		os.Exit(1)
+		fmt.Printf("error: read plg.json: %v\n", err); os.Exit(1)
 	}
 
 	if plg.IsLua() {
-		buildTarget(plg, "lua", cfg.OutDir)
+		buildTarget(plg, "lua", cfg.OutDir, "")
 		return
 	}
 
-	if cfg.Bundle {
-		buildBundle(plg, cfg.OutDir)
+	// Ensure go.mod exists with correct SDK path
+	ensureGoMod(plg, cfg.SDKPath)
+
+	// Default: bundle mode (all 3 platforms in one .hmap)
+	if cfg.Bundle || len(cfg.Targets) == 0 {
+		buildBundle(plg, cfg.OutDir, cfg.SDKPath)
 		return
 	}
 
-	// determine targets
-	targets := cfg.Targets
-	if len(targets) == 0 {
-		targets = parseTargets(plg.Targets)
-	}
-	if len(targets) == 0 {
-		targets = []string{"native"}
-	}
-
-	// build for each target
-	for _, t := range targets {
-		buildTarget(plg, t, cfg.OutDir)
+	// Explicit --target: build each separately
+	for _, t := range cfg.Targets {
+		buildTarget(plg, t, cfg.OutDir, cfg.SDKPath)
 	}
 }
 
@@ -80,7 +76,7 @@ var allBundleTargets = []struct {
 	{"windows/amd64", "plugin.dll"},
 }
 
-func buildBundle(plg *PlgConfig, outDir string) {
+func buildBundle(plg *PlgConfig, outDir string, sdkPath string) {
 	os.MkdirAll(outDir, 0755)
 	buildDir := "build"
 	os.MkdirAll(buildDir, 0755)
@@ -141,9 +137,7 @@ func buildBundle(plg *PlgConfig, outDir string) {
 	fmt.Printf("  packaged %s\n", filepath.Base(hmapPath))
 }
 
-func (p *PlgConfig) IsLua() bool {
-	return p.Entry == "main.lua"
-}
+func (p *PlgConfig) IsLua() bool { return p.Entry == "main.lua" }
 
 func readPlgJSON(path string) (*PlgConfig, error) {
 	data, err := os.ReadFile(path)
@@ -225,7 +219,108 @@ func resolveBuild(target string) (*buildConfig, string) {
 	}
 }
 
-func buildTarget(plg *PlgConfig, target, outDir string) {
+// ensureGoMod 确保插件项目的 go.mod 包含 SDK 的 replace 指令。
+// 如果 go.mod 不存在或已有正确 replace，则跳过。
+func ensureGoMod(plg *PlgConfig, sdkPath string) {
+	if sdkPath == "" {
+		// 从 plugindev 自身推断 SDK 路径
+		self, err := os.Executable()
+		if err != nil {
+			return
+		}
+		cand := filepath.Dir(filepath.Dir(filepath.Dir(self)))
+		if _, err := os.Stat(filepath.Join(cand, "sdk", "plugin.go")); err != nil {
+			return
+		}
+		sdkPath = cand
+	}
+
+	gomodPath := "go.mod"
+	data, err := os.ReadFile(gomodPath)
+	if err != nil {
+		return // no go.mod, skip
+	}
+
+	lines := strings.Split(string(data), "\n")
+	var sdkModule string
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "require ") || strings.HasPrefix(line, "require (") {
+			continue
+		}
+		if strings.Contains(line, "homeagent-sdk/sdk") || strings.Contains(line, "homeagent-sdk") {
+			parts := strings.Fields(line)
+			if len(parts) >= 1 && !strings.HasPrefix(parts[0], "//") && !strings.HasPrefix(parts[0], "replace") {
+				sdkModule = parts[0]
+			}
+		}
+	}
+	if sdkModule == "" {
+		return
+	}
+
+	// 检查是否已有 replace 指令
+	absSDK, _ := filepath.Abs(sdkPath)
+	absSDK = strings.ReplaceAll(absSDK, "\\", "/")
+	for _, line := range lines {
+		if strings.Contains(line, "replace") && strings.Contains(line, sdkModule) {
+			parts := strings.Fields(line)
+			if len(parts) >= 3 && strings.ReplaceAll(parts[2], "\\", "/") == absSDK {
+				return // 已存在且路径正确
+			}
+		}
+	}
+
+	// 追加 replace 指令
+	replaceLine := fmt.Sprintf("replace %s => %s", sdkModule, absSDK)
+	newData := string(data) + "\n" + replaceLine + "\n"
+	if err := os.WriteFile(gomodPath, []byte(newData), 0644); err != nil {
+		fmt.Printf("  warn: update go.mod replace: %v\n", err)
+	}
+}
+
+func resolveSDKPath(sdkPath string) string {
+	if sdkPath != "" {
+		abs, _ := filepath.Abs(sdkPath)
+		if _, err := os.Stat(filepath.Join(abs, "sdk", "plugin.go")); err == nil {
+			return abs
+		}
+		fmt.Printf("error: --sdk-path %q not a valid SDK\n", sdkPath)
+		os.Exit(1)
+	}
+	// Detect from plugindev's own location (internal dev)
+	self, err := os.Executable()
+	if err == nil {
+		cand := filepath.Dir(filepath.Dir(filepath.Dir(self)))
+		if _, err := os.Stat(filepath.Join(cand, "sdk", "plugin.go")); err == nil {
+			return cand
+		}
+	}
+	// Active SDK via plugindev sdk use
+	store := os.Getenv("HOMEAGENT_SDK_DIR")
+	if store == "" {
+		home, _ := os.UserHomeDir()
+		if home != "" {
+			store = filepath.Join(home, ".homeagent", "plugindev", "sdk")
+		}
+	}
+	if store != "" {
+		if d, err := os.ReadFile(filepath.Join(store, "current")); err == nil {
+			ver := strings.TrimSpace(string(d))
+			if ver != "" {
+				root := filepath.Join(store, ver)
+				if _, err := os.Stat(filepath.Join(root, "sdk", "plugin.go")); err == nil {
+					return root
+				}
+			}
+		}
+	}
+	fmt.Printf("error: cannot locate SDK. Use --sdk-path or 'plugindev sdk use'\n")
+	os.Exit(1)
+	return ""
+}
+
+func buildTarget(plg *PlgConfig, target, outDir, sdkPath string) {
 	os.MkdirAll(outDir, 0755)
 
 	// Lua: no compilation, package source directly

@@ -37,7 +37,7 @@ type Plugin struct {
 	pollTicker *time.Ticker
 }
 
-func NewPlugin(name string, config map[string]interface{}) (sdk.Plugin, error) {
+func NewPluginFactory(name string, config map[string]interface{}) (sdk.Plugin, error) {
 	return &Plugin{name: name}, nil
 }
 
@@ -122,6 +122,7 @@ func (p *Plugin) Start(s *sdk.PluginSDK) error {
 	tp := p.name + "_"
 	s.RegisterTool(tp+"subscribe", sdk.ToolDef{
 		Name: tp + "subscribe", Description: "Subscribe to an RSS/Atom feed URL",
+		NoMemory: true,
 		Parameters: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -134,6 +135,7 @@ func (p *Plugin) Start(s *sdk.PluginSDK) error {
 
 	s.RegisterTool(tp+"unsubscribe", sdk.ToolDef{
 		Name: tp + "unsubscribe", Description: "Unsubscribe from a feed",
+		NoMemory: true,
 		Parameters: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -153,6 +155,7 @@ func (p *Plugin) Start(s *sdk.PluginSDK) error {
 
 	s.RegisterTool(tp+"check_now", sdk.ToolDef{
 		Name: tp + "check_now", Description: "Manually check all feeds for new articles now",
+		NoMemory: true,
 		Parameters: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{},

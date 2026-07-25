@@ -51,7 +51,7 @@ type BrowserSession struct {
 	currentURL string
 }
 
-func NewPlugin(name string, config map[string]interface{}) (sdk.Plugin, error) {
+func NewPluginFactory(name string, config map[string]interface{}) (sdk.Plugin, error) {
 	return &Plugin{name: name, stopCh: make(chan struct{}), sessions: make(map[string]*BrowserSession)}, nil
 }
 
@@ -188,6 +188,14 @@ func (p *Plugin) Start(s *sdk.PluginSDK) error {
 
 	tp := p.name + "_"
 
+	cleaner := func(output string) string {
+		var r struct{ Content string }
+		if json.Unmarshal([]byte(output), &r) == nil && r.Content != "" {
+			return r.Content
+		}
+		return output
+	}
+
 	s.RegisterTool(tp+"search", sdk.ToolDef{
 		Name:        tp + "search",
 		Description: "使用 Bing 搜索网页。返回标题、URL 和摘要。",
@@ -199,6 +207,7 @@ func (p *Plugin) Start(s *sdk.PluginSDK) error {
 			},
 			"required": []string{"query"},
 		},
+		Cleaner: cleaner,
 	}, p.handleSearch)
 
 	s.RegisterTool(tp+"fetch", sdk.ToolDef{
@@ -213,6 +222,7 @@ func (p *Plugin) Start(s *sdk.PluginSDK) error {
 			},
 			"required": []string{"url"},
 		},
+		Cleaner: cleaner,
 	}, p.handleFetch)
 
 	s.RegisterTool(tp+"render", sdk.ToolDef{
@@ -226,6 +236,7 @@ func (p *Plugin) Start(s *sdk.PluginSDK) error {
 			},
 			"required": []string{"url"},
 		},
+		Cleaner: cleaner,
 	}, p.handleRender)
 
 	s.RegisterTool(tp+"start", sdk.ToolDef{

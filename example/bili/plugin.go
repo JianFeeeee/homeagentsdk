@@ -43,6 +43,13 @@ func (p *Plugin) Start(s *sdk.PluginSDK) error {
 			},
 			"required": []string{"url"},
 		},
+		Cleaner: func(output string) string {
+			var r struct{ Content string }
+			if json.Unmarshal([]byte(output), &r) == nil && r.Content != "" {
+				return r.Content
+			}
+			return output
+		},
 	}, p.handleBiliVideo)
 	return nil
 }
@@ -229,6 +236,6 @@ func contains(slice []string, s string) bool {
 	return false
 }
 
-func NewPlugin(name string, config map[string]interface{}) (sdk.Plugin, error) {
+func NewPluginFactory(name string, config map[string]interface{}) (sdk.Plugin, error) {
 	return &Plugin{name: name}, nil
 }

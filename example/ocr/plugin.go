@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -37,6 +38,17 @@ func (p *Plugin) Start(s *sdk.PluginSDK) error {
 				"image_data": map[string]interface{}{"type": "string", "description": "图片的base64编码数据（不含 data:image/... 前缀），与 image_url 二选一"},
 				"language":   map[string]interface{}{"type": "string", "description": "识别语言，默认 chi_sim+eng（中文简体+英文），可选 chi_sim / eng / chi_sim+eng"},
 			},
+		},
+		Cleaner: func(output string) string {
+			var r struct{ Text string }
+			if json.Unmarshal([]byte(output), &r) == nil && r.Text != "" {
+				return r.Text
+			}
+			var r2 struct{ Content string }
+			if json.Unmarshal([]byte(output), &r2) == nil && r2.Content != "" {
+				return r2.Content
+			}
+			return output
 		},
 	}, p.handleOcrImage)
 
@@ -128,7 +140,6 @@ func (p *Plugin) handleOcrImage(args map[string]interface{}) (interface{}, error
 	}, nil
 }
 
-
-func NewPlugin(name string, config map[string]interface{}) (sdk.Plugin, error) {
+func NewPluginFactory(name string, config map[string]interface{}) (sdk.Plugin, error) {
 	return &Plugin{name: name}, nil
 }

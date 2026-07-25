@@ -23,6 +23,7 @@ func (p *Plugin) Start(s *sdk.PluginSDK) error {
 	s.RegisterTool("edit_document", sdk.ToolDef{
 		Name:        "edit_document",
 		Description: "编辑 Office 文档内容。支持替换文本、修改单元格等操作。编辑后原文件被覆盖。操作前建议先用 read_document 查看内容。支持 .docx / .xlsx / .pptx。",
+		NoMemory:    true,
 		Parameters: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -124,6 +125,6 @@ func (p *Plugin) handleEditDocument(args map[string]interface{}) (interface{}, e
 }
 
 
-func NewPlugin(name string, config map[string]interface{}) (sdk.Plugin, error) {
+func NewPluginFactory(name string, config map[string]interface{}) (sdk.Plugin, error) {
 	return &Plugin{name: name}, nil
 }

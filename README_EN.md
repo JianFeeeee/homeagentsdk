@@ -95,6 +95,20 @@ The Triple data structure includes additional fields:
 - `SubjectType` — subject type
 - `ObjectType` — object type
 
+### ToolDef Field Reference
+
+The `def` parameter of `RegisterTool` is of type `sdk.ToolDef`, with the following fields:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `Name` | `string` | Tool name, use plugin name prefix to avoid conflicts |
+| `Description` | `string` | Tool description, LLM uses this for tool selection |
+| `Parameters` | `map[string]interface{}` | JSON Schema parameter definition |
+| `NoMemory` | `bool` | Default `false`; when `true`, output skips vector/jieba/distill computation (original text preserved) |
+| `Cleaner` | `func(string) string` | Optional, filters output before computation layer (e.g., extract `.content` from JSON) |
+
+For detailed design rationale of `NoMemory` and `Cleaner`, see `docs/en/PLUGIN_DEV.md` in the core repository.
+
 ### New Constructor
 
 `New()` is called by the kernel when loading a plugin. Plugin developers do not need to construct PluginSDK manually:

@@ -47,6 +47,13 @@ func (p *Plugin) Start(s *sdk.PluginSDK) error {
 			},
 			"required": []string{"agent_url", "query"},
 		},
+		Cleaner: func(output string) string {
+			var r struct{ Content string }
+			if json.Unmarshal([]byte(output), &r) == nil && r.Content != "" {
+				return r.Content
+			}
+			return output
+		},
 	}, p.handleA2AQuery)
 
 	s.RegisterTool(tp+"a2a_discover", sdk.ToolDef{
@@ -454,6 +461,6 @@ func (p *Plugin) handleStatus(args map[string]interface{}) (interface{}, error) 
 		addrStr, listening, map[bool]string{true: "运行中", false: "已停止"}[serverRunning]), nil
 }
 
-func NewPlugin(name string, config map[string]interface{}) (sdk.Plugin, error) {
+func NewPluginFactory(name string, config map[string]interface{}) (sdk.Plugin, error) {
 	return &Plugin{name: name}, nil
 }

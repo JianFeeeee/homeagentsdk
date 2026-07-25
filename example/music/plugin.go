@@ -56,7 +56,7 @@ type lyricData struct {
 	Lyric string `json:"lyric"`
 }
 
-func NewPlugin(name string, config map[string]interface{}) (sdk.Plugin, error) {
+func NewPluginFactory(name string, config map[string]interface{}) (sdk.Plugin, error) {
 	return &Plugin{name: name}, nil
 }
 
@@ -83,6 +83,13 @@ func (p *Plugin) Start(s *sdk.PluginSDK) error {
 				},
 			},
 			"required": []string{"keyword"},
+		},
+		Cleaner: func(output string) string {
+			var r struct{ Content string }
+			if json.Unmarshal([]byte(output), &r) == nil && r.Content != "" {
+				return r.Content
+			}
+			return output
 		},
 	}, p.handleSearch)
 

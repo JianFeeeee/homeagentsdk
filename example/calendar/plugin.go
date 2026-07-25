@@ -54,7 +54,7 @@ type Plugin struct {
 	remindTicker *time.Ticker
 }
 
-func NewPlugin(name string, config map[string]interface{}) (sdk.Plugin, error) {
+func NewPluginFactory(name string, config map[string]interface{}) (sdk.Plugin, error) {
 	return &Plugin{name: name, stopCh: make(chan struct{})}, nil
 }
 

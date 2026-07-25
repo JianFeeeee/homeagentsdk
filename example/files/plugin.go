@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -58,6 +59,14 @@ func (p *Plugin) Start(s *sdk.PluginSDK) error {
 				"limit":  map[string]interface{}{"type": "integer", "description": "Max lines to return (optional)"},
 			},
 			"required": []string{"path"},
+		},
+		NoMemory: false,
+		Cleaner: func(output string) string {
+			var r struct{ Content string }
+			if json.Unmarshal([]byte(output), &r) == nil && r.Content != "" {
+				return r.Content
+			}
+			return output
 		},
 	}, p.handleRead)
 
@@ -478,6 +487,6 @@ func getSetting[T any](s sdk.SettingsAPI, key string, def T) T {
 	return val
 }
 
-func NewPlugin(name string, config map[string]interface{}) (sdk.Plugin, error) {
+func NewPluginFactory(name string, config map[string]interface{}) (sdk.Plugin, error) {
 	return &Plugin{name: name}, nil
 }

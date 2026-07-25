@@ -46,8 +46,14 @@ func (p *Plugin) Start(s *sdk.PluginSDK) error {
 	})
 	tp := p.name + "_"
 	s.RegisterTool(tp+"hello", sdk.ToolDef{
-		Name: tp + "hello", Description: "A hello world tool",
-		Parameters: map[string]interface{}{"type": "object", "properties": map[string]interface{}{}},
+		Name:        tp + "hello",
+		Description: "A hello world tool",
+		Parameters:  map[string]interface{}{"type": "object", "properties": map[string]interface{}{}},
+		NoMemory:    false, // 工具输出对 LLM 注意力有信号价值时为 false，纯操作工具为 true
+		// Cleaner: func(output string) string {
+		//     // 工具输出参与向量化/jieba/蒸馏前，在此过滤噪音
+		//     return output
+		// },
 	}, p.handleHello)
 	fmt.Printf("[%s] started\n", p.name)
 	return nil
@@ -59,7 +65,7 @@ func (p *Plugin) handleHello(args map[string]interface{}) (interface{}, error) {
 	return map[string]interface{}{"content": "Hello from {{.Plg.Name}} plugin!"}, nil
 }
 
-func NewPlugin(name string, config map[string]interface{}) (sdk.Plugin, error) {
+func NewPluginFactory(name string, config map[string]interface{}) (sdk.Plugin, error) {
 	return &Plugin{name: name}, nil
 }
 `
@@ -157,7 +163,7 @@ func NewPlugin(name *C.char, configJSON *C.char) unsafe.Pointer {
 			if c, ok := wrapper["config"].(map[string]interface{}); ok { config = c }
 		}
 	}
-	plg, err := NewPlugin(goName, config)
+	plg, err := NewPluginFactory(goName, config)
 	if err != nil { return nil }
 	return newHandle(plg)
 }
@@ -173,6 +179,7 @@ func StartPlugin(handle unsafe.Pointer) C.int {
 		},
 		func(stage sdk.Stage, handler sdk.StageHandler) { bs.stages[string(stage)] = handler },
 		func(name string) error { return nil },
+		func(name string, caps int, desc string, handler sdk.ToolHandler) error { return nil },
 	)
 	if err := bs.plugin.Start(mockSDK); err != nil { return 1 }
 	return 0
@@ -207,11 +214,11 @@ func InvokeToolJSON(handle unsafe.Pointer, toolName *C.char, argsJSON *C.char) *
 	if bs == nil || toolName == nil { return nil }
 	goName := C.GoString(toolName)
 	handler, ok := bs.handlers[goName]
-	if !ok { r, _ := json.Marshal(map[string]interface{}{"error": "tool not found: " + goName}); return C.CString(string(r)) }
+	if !ok { errMsg, _ := json.Marshal(map[string]interface{}{"error": "tool not found: " + goName}); return C.CString(string(errMsg)) }
 	var args map[string]interface{}
 	if argsJSON != nil { json.Unmarshal([]byte(C.GoString(argsJSON)), &args) }
 	r, err := handler(args)
-	if err != nil { r, _ = json.Marshal(map[string]interface{}{"error": err.Error()}); return C.CString(string(r)) }
+	if err != nil { errMsg, _ := json.Marshal(map[string]interface{}{"error": err.Error()}); return C.CString(string(errMsg)) }
 	b, _ := json.Marshal(r)
 	return C.CString(string(b))
 }

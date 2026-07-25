@@ -53,7 +53,7 @@ func (p *Plugin) Start(s *sdk.PluginSDK) error {
 
 func (p *Plugin) Stop() error { return nil }
 
-func NewPlugin(name string, config map[string]interface{}) (sdk.Plugin, error) {
+func NewPluginFactory(name string, config map[string]interface{}) (sdk.Plugin, error) {
 	return &Plugin{}, nil
 }
 
