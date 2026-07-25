@@ -13,55 +13,80 @@ import (
 )
 
 type BuildConfig struct {
-	OutDir  string
-	Targets []string
-	Bundle  bool
-	SDKPath string
+	OutDir   string
+	Targets  []string
+	Bundle   bool
+	SDKPath  string
+	Replaces []string
 }
 
 func cmdBuild(args []string) {
-	cfg := BuildConfig{OutDir: "dist"}
-	for i := 0; i < len(args); i++ {
-		switch args[i] {
-		case "--outdir":
-			if i+1 < len(args) {
-				cfg.OutDir = args[i+1]; i++
-			}
-		case "--target":
-			if i+1 < len(args) {
-				cfg.Targets = append(cfg.Targets, args[i+1]); i++
-			}
-		case "--bundle":
-			cfg.Bundle = true
-		case "--sdk-path":
-			if i+1 < len(args) {
-				cfg.SDKPath = args[i+1]; i++
-			}
-		}
-	}
-
+	// Read all config from plg.json first
 	plg, err := readPlgJSON("plg.json")
 	if err != nil {
 		fmt.Printf("error: read plg.json: %v\n", err); os.Exit(1)
 	}
 
+	// Base config from plg.json
+	outDir := plg.OutDirDefault()
+	targets := plg.TargetList()
+	bundle := plg.BundleDefault()
+	sdkPath := plg.SDKPath
+	var cliReplaces []string
+
+	// CLI flags override plg.json
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--outdir":
+			if i+1 < len(args) {
+				outDir = args[i+1]; i++
+			}
+		case "--target":
+			if i+1 < len(args) {
+				targets = append(targets, args[i+1]); i++
+			}
+		case "--bundle":
+			bundle = true
+		case "--no-bundle":
+			bundle = false
+		case "--sdk-path":
+			if i+1 < len(args) {
+				sdkPath = args[i+1]; i++
+			}
+		case "--replace", "-R":
+			if i+1 < len(args) {
+				cliReplaces = append(cliReplaces, args[i+1]); i++
+			}
+		}
+	}
+
 	if plg.IsLua() {
-		buildTarget(plg, "lua", cfg.OutDir, "")
+		buildTarget(plg, "lua", outDir, "")
 		return
 	}
 
 	// Ensure go.mod exists with correct SDK path
-	ensureGoMod(plg, cfg.SDKPath)
+	ensureGoMod(plg, sdkPath)
 
-	// Default: bundle mode (all 3 platforms in one .hmap)
-	if cfg.Bundle || len(cfg.Targets) == 0 {
-		buildBundle(plg, cfg.OutDir, cfg.SDKPath)
+	// Merge plg.json replaces + CLI overrides
+	replaceSlice := plg.ReplacesToSlice()
+	replaceSlice = append(replaceSlice, cliReplaces...)
+
+	// Apply go.mod replace directives for single-target go build
+	gmPatcher := NewGoModPatcher(".", replaceSlice)
+	gmRestore, err := gmPatcher.Apply()
+	if err != nil {
+		fmt.Printf("warn: apply go.mod replaces: %v\n", err)
+	}
+	defer gmRestore()
+
+	if bundle || len(targets) == 0 {
+		buildBundle(plg, outDir, sdkPath)
 		return
 	}
 
-	// Explicit --target: build each separately
-	for _, t := range cfg.Targets {
-		buildTarget(plg, t, cfg.OutDir, cfg.SDKPath)
+	for _, t := range targets {
+		buildTarget(plg, t, outDir, sdkPath)
 	}
 }
 
@@ -84,7 +109,7 @@ func buildBundle(plg *PlgConfig, outDir string, sdkPath string) {
 	// Auto-generate C ABI bridge for non-Windows
 	bridgeCleanup := generateBridge("")
 	defer bridgeCleanup()
-	thirdpartCleanup := linkThirdpart("linux/amd64")
+	thirdpartCleanup := linkThirdpart(plg, "linux/amd64")
 	defer thirdpartCleanup()
 
 	var binaries []binEntry
@@ -364,8 +389,8 @@ func buildTarget(plg *PlgConfig, target, outDir, sdkPath string) {
 	bridgeCleanup := generateBridge(cfg.goos)
 	_ = bridgeCleanup // DISABLED cleanup for debug
 
-	// Auto-link thirdpart/ contents
-	thirdpartCleanup := linkThirdpart(target)
+	// Auto-link thirdpart/ contents + source_dirs + replace targets
+	thirdpartCleanup := linkThirdpart(plg, target)
 	defer thirdpartCleanup()
 
 	// Write plugin.json with the correct entry for this target
@@ -605,26 +630,64 @@ func generateBridge(goos string) func() {
 	}
 }
 
-// linkThirdpart scans thirdpart/ for source files and generates auto-import stubs.
-// For Go plugins: if thirdpart/*.go exists, generate z_thirdpart.go with import.
-// For Lua plugins: no action needed (thirdpart/*.lua is packaged separately in buildTarget).
-// Returns cleanup function to remove generated files.
-func linkThirdpart(target string) func() {
-	const thirdpartDir = "thirdpart"
+// linkThirdpart scans thirdpart/, source_dirs from plg.json, and replace target dirs
+// for source files, generating auto-import stubs. Returns cleanup function.
+func linkThirdpart(plg *PlgConfig, target string) func() {
 	const importFile = "z_thirdpart.go"
 	os.Remove(importFile)
 
-	if info, err := os.Stat(thirdpartDir); err != nil || !info.IsDir() {
+	if target == "lua" {
 		return func() {}
 	}
 
-	entries, err := os.ReadDir(thirdpartDir)
+	gomodPath := "go.mod"
+	data, err := os.ReadFile(gomodPath)
 	if err != nil {
 		return func() {}
 	}
+	modulePath := ""
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.HasPrefix(line, "module ") {
+			modulePath = strings.TrimSpace(line[7:])
+			break
+		}
+	}
+	if modulePath == "" {
+		return func() {}
+	}
 
-	// For Go builds: check for .go files
-	if target != "lua" {
+	// Collect directories to scan: thirdpart/ + source_dirs from plg.json + replace target dirs
+	var dirs []string
+	if info, err := os.Stat("thirdpart"); err == nil && info.IsDir() {
+		dirs = append(dirs, "thirdpart")
+	}
+	dirs = append(dirs, plg.SourceDirs...)
+	for _, to := range plg.Replaces {
+		if abs, err := filepath.Abs(to); err == nil {
+			if info, err := os.Stat(abs); err == nil && info.IsDir() {
+				dirs = append(dirs, abs)
+			}
+		}
+	}
+
+	// Deduplicate
+	seen := map[string]bool{}
+	var unique []string
+	for _, d := range dirs {
+		abs, _ := filepath.Abs(d)
+		if abs != "" && !seen[abs] {
+			seen[abs] = true
+			unique = append(unique, d)
+		}
+	}
+
+	// Generate import stubs for each directory with .go files
+	var stubs []string
+	for _, d := range unique {
+		entries, err := os.ReadDir(d)
+		if err != nil {
+			continue
+		}
 		hasGo := false
 		for _, e := range entries {
 			if !e.IsDir() && strings.HasSuffix(e.Name(), ".go") {
@@ -632,26 +695,39 @@ func linkThirdpart(target string) func() {
 				break
 			}
 		}
-		if hasGo {
-			// Read go.mod to get the module path
-			gomodPath := "go.mod"
-			data, err := os.ReadFile(gomodPath)
-			if err != nil {
-				return func() {}
-			}
-			modulePath := ""
-			for _, line := range strings.Split(string(data), "\n") {
-				if strings.HasPrefix(line, "module ") {
-					modulePath = strings.TrimSpace(line[7:])
+		if !hasGo {
+			continue
+		}
+
+		// Determine import path: for relative dirs under module, use module path prefix;
+		// for absolute paths, derive from replace or use package name
+		dirName := filepath.Base(d)
+		if !filepath.IsAbs(d) {
+			importPath := modulePath + "/" + d
+			stubs = append(stubs, importPath)
+		} else {
+			// External directory: use the replace "from" key if found, else use dir name
+			found := false
+			for from, to := range plg.Replaces {
+				if absTo, _ := filepath.Abs(to); absTo == d {
+					stubs = append(stubs, from)
+					found = true
 					break
 				}
 			}
-			if modulePath != "" {
-				importPath := modulePath + "/" + thirdpartDir
-				stub := "package main\nimport _ \"" + importPath + "\"\n"
-				os.WriteFile(importFile, []byte(stub), 0644)
+			if !found && dirName != "" {
+				stubs = append(stubs, modulePath+"/"+dirName)
 			}
 		}
+	}
+
+	if len(stubs) > 0 {
+		var sb strings.Builder
+		sb.WriteString("package main\n")
+		for _, s := range stubs {
+			sb.WriteString("import _ \"" + s + "\"\n")
+		}
+		os.WriteFile(importFile, []byte(sb.String()), 0644)
 	}
 
 	return func() {

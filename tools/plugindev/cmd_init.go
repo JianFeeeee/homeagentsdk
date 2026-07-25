@@ -4,22 +4,52 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"text/template"
 
 	"gitcode.com/JianFeeeee/homeagent-sdk/meta"
 )
 
+func (p *PlgConfig) ReplacesToSlice() []string {
+	var s []string
+	for from, to := range p.Replaces {
+		s = append(s, from+"="+to)
+	}
+	sort.Strings(s) // deterministic order
+	return s
+}
+
 type PlgConfig struct {
-	Name        string   `json:"name"`
-	NameZh      string   `json:"name_zh"`
-	NameEn      string   `json:"name_en"`
-	Version     string   `json:"version"`
-	Description string   `json:"description"`
-	Author      string   `json:"author"`
-	Entry       string   `json:"entry"`
-	Tags        []string `json:"tags"`
-	Targets     string   `json:"targets"`
+	Name        string            `json:"name"`
+	NameZh      string            `json:"name_zh"`
+	NameEn      string            `json:"name_en"`
+	Version     string            `json:"version"`
+	Description string            `json:"description"`
+	Author      string            `json:"author"`
+	Entry       string            `json:"entry"`
+	Tags        []string          `json:"tags"`
+	Targets     string            `json:"targets"`
+	OutDir      string            `json:"outdir,omitempty"`
+	Bundle      *bool             `json:"bundle,omitempty"`
+	SDKPath     string            `json:"sdk_path,omitempty"`
+	GoVersion   string            `json:"go_version,omitempty"`
+	Replaces    map[string]string `json:"replaces,omitempty"`
+	SourceDirs  []string          `json:"source_dirs,omitempty"`
+}
+
+// TargetList parses the Targets string into a slice.
+func (p *PlgConfig) TargetList() []string { return parseTargets(p.Targets) }
+
+// BundleDefault returns true if bundle mode is not explicitly disabled.
+func (p *PlgConfig) BundleDefault() bool { return p.Bundle == nil || *p.Bundle }
+
+// OutDirDefault returns the output directory, defaulting to "dist".
+func (p *PlgConfig) OutDirDefault() string {
+	if p.OutDir != "" {
+		return p.OutDir
+	}
+	return "dist"
 }
 
 type TemplateData struct {

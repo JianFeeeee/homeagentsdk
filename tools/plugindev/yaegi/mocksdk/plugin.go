@@ -1,0 +1,410 @@
+package mocksdk
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"strings"
+	"sync"
+)
+
+var (
+	DebugLog = false
+	mu       sync.Mutex
+)
+
+func logf(format string, args ...interface{}) {
+	if DebugLog {
+		fmt.Fprintf(os.Stderr, "[mocksdk] "+format+"\n", args...)
+	}
+}
+
+type Plugin interface {
+	Name() string
+	Start(sdk *PluginSDK) error
+	Stop() error
+}
+
+type ToolHandler func(args map[string]interface{}) (interface{}, error)
+
+type StageHandler func(ctx *StageContext) error
+
+type Stage string
+
+const (
+	StageOnInput        Stage = "on_input"
+	StagePreAction      Stage = "pre_action"
+	StagePostAction     Stage = "post_action"
+	StageBeforeToolcall Stage = "before_toolcall"
+	StageAfterToolcall  Stage = "after_toolcall"
+	StageBeforeOutput   Stage = "before_output"
+	StageAfterOutput    Stage = "after_output"
+)
+
+type StageContext struct {
+	mu               sync.RWMutex
+	RawMessage       string
+	UserID           string
+	GroupID          string
+	ContextMsgs      []map[string]interface{}
+	LLMText          string
+	ReasoningContent string
+	TokenUsage       map[string]int
+	ToolCalls        []ToolCall
+	ToolResults      []ToolResult
+	FinalText        string
+	Response         *string
+	Phase            Stage
+	Memory           []MemItem
+	NoMemory         bool
+	Extra            map[string]interface{}
+	Errors           []string
+}
+
+type MemItem struct {
+	Role    string  `json:"role"`
+	Content string  `json:"content"`
+	Score   float64 `json:"score"`
+}
+
+type ToolCall struct {
+	ID        string                 `json:"id"`
+	Name      string                 `json:"name"`
+	Plugin    string                 `json:"plugin,omitempty"`
+	Arguments map[string]interface{} `json:"arguments"`
+}
+
+type ToolResult struct {
+	CallID  string      `json:"call_id"`
+	Name    string      `json:"name"`
+	Plugin  string      `json:"plugin,omitempty"`
+	Success bool        `json:"success"`
+	Result  interface{} `json:"result"`
+}
+
+type ToolDef struct {
+	Name        string                 `json:"name"`
+	Plugin      string                 `json:"plugin,omitempty"`
+	Description string                 `json:"description"`
+	Parameters  map[string]interface{} `json:"parameters"`
+	NoMemory    bool                   `json:"no_memory,omitempty"`
+	Cleaner     func(string) string    `json:"-"`
+}
+
+type IOInjector interface {
+	InjectInterruptText(source, channel, text string)
+	InjectText(source, channel, text string)
+	InjectTextNoMemory(source, channel, text string)
+}
+
+type EventType string
+
+const (
+	EventRawInput      EventType = "raw_input"
+	EventAgentOutput   EventType = "agent_output"
+	EventAgentLLMChain EventType = "agent_llm_chain"
+	EventToolCall      EventType = "tool_call"
+	EventReasoning     EventType = "reasoning"
+	EventStage         EventType = "stage"
+	EventSystem        EventType = "system"
+)
+
+type Event struct {
+	Type      EventType              `json:"type"`
+	Source    string                 `json:"source"`
+	Payload   map[string]interface{} `json:"payload"`
+	Timestamp int64                  `json:"timestamp"`
+}
+
+type EventHandler func(evt *Event)
+
+type EventSubscriber interface {
+	Subscribe(eventType EventType, handler EventHandler) func()
+}
+
+type StageScope int
+
+const (
+	StageScopeGlobal   StageScope = 0
+	StageScopeOwnTools StageScope = 1
+)
+
+type ConfigDef struct {
+	Key         string   `json:"key"`
+	Default     string   `json:"default"`
+	Type        string   `json:"type"`
+	DisplayName string   `json:"display_name"`
+	Description string   `json:"description"`
+	Category    string   `json:"category"`
+	Options     []string `json:"options,omitempty"`
+}
+
+type SettingsAPI interface {
+	Get(key string) (interface{}, error)
+	Set(key string, value interface{}) error
+	List(prefix string) ([]string, error)
+	GetCore(key string) (interface{}, error)
+	SetCore(key string, value interface{}) error
+	ListCore(prefix string) ([]string, error)
+	GetPlugin(plugin, key string) (interface{}, error)
+	SetPlugin(plugin, key string, value interface{}) error
+	ListPlugin(plugin, prefix string) ([]string, error)
+	RegisterDef(def ConfigDef)
+	Defs(prefix string) []*ConfigDef
+	Dump() map[string]interface{}
+	Plugins() []string
+}
+
+type mockSettings struct{ data map[string]interface{} }
+
+func (s *mockSettings) Get(key string) (interface{}, error) {
+	v, ok := s.data[key]
+	if !ok { return nil, nil }
+	return v, nil
+}
+func (s *mockSettings) Set(key string, value interface{}) error { s.data[key] = value; return nil }
+func (s *mockSettings) List(prefix string) ([]string, error) {
+	var ks []string
+	for k := range s.data {
+		if strings.HasPrefix(k, prefix) { ks = append(ks, k) }
+	}
+	return ks, nil
+}
+func (s *mockSettings) GetCore(key string) (interface{}, error) { return nil, nil }
+func (s *mockSettings) SetCore(key string, value interface{}) error { return nil }
+func (s *mockSettings) ListCore(prefix string) ([]string, error) { return nil, nil }
+func (s *mockSettings) GetPlugin(p, k string) (interface{}, error) { return nil, nil }
+func (s *mockSettings) SetPlugin(p, k string, v interface{}) error { return nil }
+func (s *mockSettings) ListPlugin(p, prefix string) ([]string, error) { return nil, nil }
+func (s *mockSettings) RegisterDef(def ConfigDef) {
+	logf("config def: %s = %s", def.Key, def.Default)
+}
+func (s *mockSettings) Defs(prefix string) []*ConfigDef { return nil }
+func (s *mockSettings) Dump() map[string]interface{} { return s.data }
+func (s *mockSettings) Plugins() []string { return nil }
+
+type Entity struct {
+	Name       string            `json:"name"`
+	Type       string            `json:"type"`
+	Properties map[string]string `json:"properties,omitempty"`
+}
+
+type Relation struct {
+	Subject   string `json:"subject"`
+	Predicate string `json:"predicate"`
+	Object    string `json:"object"`
+}
+
+type Triple struct {
+	Subject   string `json:"subject"`
+	Predicate string `json:"predicate"`
+	Object    string `json:"object"`
+}
+
+type MemoryAPI interface {
+	Recall(q []string, depth int) ([]Entity, []Relation, error)
+	Commit(triples []Triple) error
+	Introspect() (map[string]interface{}, error)
+	MergeEntities(source, target string) (int, error)
+	Purge(conditions map[string]string, mode string) (int, error)
+}
+
+type mockMemory struct{}
+
+func (mockMemory) Recall(q []string, d int) ([]Entity, []Relation, error) { return nil, nil, nil }
+func (mockMemory) Commit(t []Triple) error                                  { return nil }
+func (mockMemory) Introspect() (map[string]interface{}, error)              { return map[string]interface{}{}, nil }
+func (mockMemory) MergeEntities(s, t string) (int, error)                   { return 0, nil }
+func (mockMemory) Purge(c map[string]string, m string) (int, error)         { return 0, nil }
+
+type Doc struct {
+	ID      string `json:"id"`
+	Title   string `json:"title"`
+	Content string `json:"content"`
+	Source  string `json:"source"`
+}
+
+type DocMemoryAPI interface {
+	Query(text string, topK int) []*Doc
+	Insert(doc *Doc) error
+	Remove(id string)
+	Stats() map[string]interface{}
+}
+
+type mockDocMemory struct{}
+
+func (mockDocMemory) Query(t string, k int) []*Doc       { return nil }
+func (mockDocMemory) Insert(doc *Doc) error               { return nil }
+func (mockDocMemory) Remove(id string)                    {}
+func (mockDocMemory) Stats() map[string]interface{}       { return nil }
+
+type TextEvent struct {
+	Timestamp int64  `json:"timestamp"`
+	Role      string `json:"role"`
+	Content   string `json:"content"`
+	Source    string `json:"source"`
+}
+
+type TextMemoryAPI interface {
+	Append(evt TextEvent) error
+}
+
+type mockTextMemory struct{}
+
+func (mockTextMemory) Append(evt TextEvent) error { return nil }
+
+type Knowledge struct {
+	Name    string `json:"name"`
+	Content string `json:"content"`
+}
+
+type KnowledgeAPI interface {
+	Search(query string, topK int) ([]*Knowledge, error)
+	Add(name, content string) error
+	List() ([]string, error)
+}
+
+type mockKnowledge struct{}
+
+func (mockKnowledge) Search(q string, k int) ([]*Knowledge, error) { return nil, nil }
+func (mockKnowledge) Add(n, c string) error                        { return nil }
+func (mockKnowledge) List() ([]string, error)                      { return nil, nil }
+
+type PersonProfile struct {
+	Name   string            `json:"name"`
+	Traits map[string]string `json:"traits"`
+}
+
+type SocialRelation struct {
+	Target   string `json:"target"`
+	Relation string `json:"relation"`
+}
+
+type SocialAPI interface {
+	GetPerson(name string) (*PersonProfile, error)
+	GetTrait(name, trait string) (string, bool)
+	GetRelations(name string) ([]SocialRelation, error)
+	GetNetwork(name string, depth int) ([]*PersonProfile, error)
+	ListPersons() ([]string, error)
+}
+
+type mockSocial struct{}
+
+func (mockSocial) GetPerson(n string) (*PersonProfile, error)           { return nil, nil }
+func (mockSocial) GetTrait(n, t string) (string, bool)                  { return "", false }
+func (mockSocial) GetRelations(name string) ([]SocialRelation, error)   { return nil, nil }
+func (mockSocial) GetNetwork(n string, d int) ([]*PersonProfile, error) { return nil, nil }
+func (mockSocial) ListPersons() ([]string, error)                       { return nil, nil }
+
+type LLMAPI interface {
+	ListSources() []string
+	SetSource(name string) error
+	CurrentSource() string
+}
+
+type mockLLM struct{}
+
+func (mockLLM) ListSources() []string    { return nil }
+func (mockLLM) SetSource(n string) error  { return nil }
+func (mockLLM) CurrentSource() string     { return "" }
+
+type IOInjectorImpl struct{}
+
+func (IOInjectorImpl) InjectInterruptText(source, channel, text string) {
+	logf("inject_interrupt: source=%s channel=%s", source, channel)
+}
+func (IOInjectorImpl) InjectText(source, channel, text string) {
+	logf("inject_text: source=%s channel=%s", source, channel)
+}
+func (IOInjectorImpl) InjectTextNoMemory(source, channel, text string) {
+	logf("inject_text_no_memory: source=%s channel=%s", source, channel)
+}
+
+type PluginSDK struct {
+	Name        string
+	mu          sync.RWMutex
+	toolDefs    map[string]ToolDef
+	toolHandlers map[string]ToolHandler
+	stageHandlers map[string]StageHandler
+	outChannels  map[string]ToolHandler
+	Settings     SettingsAPI
+	IO           IOInjector
+}
+
+func New(name string) *PluginSDK {
+	return &PluginSDK{
+		Name:         name,
+		toolDefs:     make(map[string]ToolDef),
+		toolHandlers: make(map[string]ToolHandler),
+		stageHandlers: make(map[string]StageHandler),
+		outChannels:  make(map[string]ToolHandler),
+		Settings:     &mockSettings{data: map[string]interface{}{}},
+		IO:           IOInjectorImpl{},
+	}
+}
+
+func (s *PluginSDK) RegisterTool(name string, def ToolDef, handler ToolHandler) {
+	logf("register_tool: %s", name)
+	mu.Lock()
+	defer mu.Unlock()
+	s.toolDefs[name] = def
+	s.toolHandlers[name] = handler
+}
+
+func (s *PluginSDK) RegisterStage(stage Stage, handler StageHandler) {
+	logf("register_stage: %s", string(stage))
+	mu.Lock()
+	defer mu.Unlock()
+	s.stageHandlers[string(stage)] = handler
+}
+
+func (s *PluginSDK) RegisterOutputChannel(name string, caps int, desc string, handler ToolHandler) {
+	logf("register_output_channel: %s", name)
+	mu.Lock()
+	defer mu.Unlock()
+	s.outChannels[name] = handler
+}
+
+func (s *PluginSDK) RegisterPluginAPI(name string) {
+	logf("register_api: %s", name)
+}
+
+func (s *PluginSDK) CallTool(name string, args map[string]interface{}) (interface{}, error) {
+	mu.Lock()
+	handler, ok := s.toolHandlers[name]
+	mu.Unlock()
+	if !ok {
+		return nil, fmt.Errorf("tool not found: %s", name)
+	}
+	return handler(args)
+}
+
+func (s *PluginSDK) CallStage(stage string, ctx *StageContext) error {
+	mu.Lock()
+	handler, ok := s.stageHandlers[stage]
+	mu.Unlock()
+	if !ok {
+		return nil
+	}
+	return handler(ctx)
+}
+
+func (s *PluginSDK) ListTools() []ToolDef {
+	mu.Lock()
+	defer mu.Unlock()
+	defs := make([]ToolDef, 0, len(s.toolDefs))
+	for _, def := range s.toolDefs {
+		defs = append(defs, def)
+	}
+	return defs
+}
+
+func (s *PluginSDK) ListToolsJSON() string {
+	defs := s.ListTools()
+	b, _ := json.MarshalIndent(defs, "", "  ")
+	return string(b)
+}
+
+func NewPluginSDK(name string) *PluginSDK {
+	return New(name)
+}

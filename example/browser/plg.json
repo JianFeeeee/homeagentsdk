@@ -1,4 +1,4 @@
-{
+﻿{
   "name": "browser",
   "name_zh": "浏览器",
   "name_en": "Browser",
@@ -7,5 +7,9 @@
   "author": "HomeAgent",
   "entry": "plugin.so",
   "tags": ["web", "search", "fetch", "browser", "cdp"],
-  "targets": "linux/amd64"
+  "targets": "linux/amd64",
+  "outdir": "dist",
+  "bundle": true,
+  "replaces": {},
+  "source_dirs": []
 }

@@ -1,4 +1,4 @@
-{
+﻿{
   "name": "a2a",
   "name_zh": "A2A 代理通信",
   "name_en": "A2A Agent Communication",
@@ -7,5 +7,9 @@
   "author": "HomeAgent",
   "entry": "plugin.so",
   "tags": ["a2a", "agent", "interop"],
-  "targets": "linux/amd64"
+  "targets": "linux/amd64",
+  "outdir": "dist",
+  "bundle": true,
+  "replaces": {},
+  "source_dirs": []
 }

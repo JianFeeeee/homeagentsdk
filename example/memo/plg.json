@@ -1,4 +1,4 @@
-{
+﻿{
   "name": "memo",
   "name_zh": "备忘录",
   "name_en": "Memo/Notes",
@@ -7,5 +7,9 @@
   "author": "HomeAgent",
   "entry": "plugin.so",
   "tags": ["memo", "todo", "notes"],
-  "targets": "linux/amd64"
+  "targets": "linux/amd64",
+  "outdir": "dist",
+  "bundle": true,
+  "replaces": {},
+  "source_dirs": []
 }

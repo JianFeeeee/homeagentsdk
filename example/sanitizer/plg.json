@@ -1,4 +1,4 @@
-{
+﻿{
   "name": "sanitizer",
   "name_zh": "输出清洗",
   "name_en": "sanitizer",
@@ -7,5 +7,9 @@
   "author": "HomeAgent SDK",
   "entry": "plugin.so",
   "tags": ["sanitizer"],
-  "targets": "linux/amd64"
+  "targets": "linux/amd64",
+  "outdir": "dist",
+  "bundle": true,
+  "replaces": {},
+  "source_dirs": []
 }

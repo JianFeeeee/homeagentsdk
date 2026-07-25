@@ -7,5 +7,10 @@
   "author": "HomeAgent",
   "entry": "plugin.so",
   "tags": ["weather", "forecast", "wttr"],
-  "targets": "linux/amd64"
+  "targets": "linux/amd64",
+  "outdir": "dist",
+  "bundle": true,
+  "replaces": {},
+  "source_dirs": []
 }
+

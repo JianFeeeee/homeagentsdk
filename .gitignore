@@ -8,9 +8,6 @@ plugin.json
 build/
 dist/
 
-# Binaries
-*.exe
-
 # Test artifacts
 testdist/
 
@@ -21,5 +18,10 @@ testdist/
 z_bridge_gen.go
 z_entry.c
 
-# Binary
-plugindev
+# Binaries (except pre-built distributions in bin/)
+/plugindev
+*_debug*
+
+# Pre-built plugindev binaries in bin/ should be tracked
+!bin/plugindev*
+!bin/*.exe

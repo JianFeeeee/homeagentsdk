@@ -1,4 +1,4 @@
-{
+﻿{
   "name": "calendar",
   "name_zh": "日历",
   "name_en": "Calendar",
@@ -7,5 +7,9 @@
   "author": "HomeAgent",
   "entry": "plugin.so",
   "tags": ["calendar", "event", "reminder", "schedule"],
-  "targets": "linux/amd64"
+  "targets": "linux/amd64",
+  "outdir": "dist",
+  "bundle": true,
+  "replaces": {},
+  "source_dirs": []
 }

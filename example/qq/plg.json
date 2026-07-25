@@ -1,4 +1,4 @@
-{
+﻿{
   "name": "qq",
   "name_zh": "QQ消息",
   "name_en": "qq",
@@ -7,5 +7,9 @@
   "author": "HomeAgent",
   "entry": "plugin.so",
   "tags": ["qq", "messaging"],
-  "targets": "linux/amd64"
+  "targets": "linux/amd64",
+  "outdir": "dist",
+  "bundle": true,
+  "replaces": {},
+  "source_dirs": []
 }

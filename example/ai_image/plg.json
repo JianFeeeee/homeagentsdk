@@ -1,4 +1,4 @@
-{
+﻿{
   "name": "ai_image",
   "name_zh": "AI绘图",
   "name_en": "AI Image",
@@ -7,5 +7,9 @@
   "author": "HomeAgent",
   "entry": "plugin.so",
   "tags": ["ai", "image", "draw", "generate"],
-  "targets": "linux/amd64"
+  "targets": "linux/amd64",
+  "outdir": "dist",
+  "bundle": true,
+  "replaces": {},
+  "source_dirs": []
 }

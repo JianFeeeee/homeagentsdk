@@ -1,4 +1,4 @@
-{
+﻿{
   "name": "rss",
   "name_zh": "RSS订阅",
   "name_en": "RSS",
@@ -7,5 +7,9 @@
   "author": "HomeAgent",
   "entry": "plugin.so",
   "tags": ["rss", "feed", "subscription", "monitor"],
-  "targets": "linux/amd64"
+  "targets": "linux/amd64",
+  "outdir": "dist",
+  "bundle": true,
+  "replaces": {},
+  "source_dirs": []
 }

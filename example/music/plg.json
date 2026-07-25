@@ -1,4 +1,4 @@
-{
+﻿{
   "name": "music",
   "name_zh": "音乐搜索",
   "name_en": "Music Search",
@@ -7,5 +7,9 @@
   "author": "HomeAgent",
   "entry": "plugin.so",
   "tags": ["music", "song", "lyrics", "网易云"],
-  "targets": "linux/amd64"
+  "targets": "linux/amd64",
+  "outdir": "dist",
+  "bundle": true,
+  "replaces": {},
+  "source_dirs": []
 }

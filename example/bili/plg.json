@@ -1,4 +1,4 @@
-{
+﻿{
   "name": "bili",
   "name_zh": "B站视频下载",
   "name_en": "Bilibili Video Downloader",
@@ -7,5 +7,9 @@
   "author": "HomeAgent",
   "entry": "plugin.so",
   "tags": ["bili", "video", "download"],
-  "targets": "linux/amd64"
+  "targets": "linux/amd64",
+  "outdir": "dist",
+  "bundle": true,
+  "replaces": {},
+  "source_dirs": []
 }

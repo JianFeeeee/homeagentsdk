@@ -136,15 +136,41 @@ func New(name string, sett SettingsAPI, regTool ToolRegistrar, regStage StageReg
 
 ```json
 {
-  "name": "my-plugin",
+  "name": "weather",
+  "name_zh": "天气查询",
+  "name_en": "Weather",
   "version": "1.0.0",
-  "lang": "go",
-  "entry": "main.go",
-  "description": "插件描述",
-  "channels": ["my-channel"],
-  "dependencies": {}
+  "description": "天气查询插件",
+  "author": "HomeAgent",
+  "entry": "plugin.so",
+  "tags": ["weather", "forecast"],
+  "targets": "linux/amd64,windows/amd64",
+  "outdir": "dist",
+  "bundle": true,
+  "replaces": {
+    "github.com/example/pkg": "../local/pkg"
+  },
+  "source_dirs": [
+    "../shared-lib"
+  ]
 }
 ```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `name` | string | 插件标识名 |
+| `name_zh` | string | 中文名 |
+| `name_en` | string | 英文名 |
+| `version` | string | 版本号 |
+| `description` | string | 插件描述 |
+| `author` | string | 作者 |
+| `entry` | string | 入口文件（`plugin.so` / `main.lua`） |
+| `tags` | string[] | 标签 |
+| `targets` | string | 构建目标，逗号分隔（如 `linux/amd64,windows/amd64`） |
+| `outdir` | string | 输出目录（默认 `dist`） |
+| `bundle` | bool | 是否 bundle 模式（同时编译多平台） |
+| `replaces` | object | Go 模块替换，key=模块路径，value=本地路径 |
+| `source_dirs` | string[] | 额外源码搜索路径（编译时自动导入） |
 
 ### .hmap 包格式
 

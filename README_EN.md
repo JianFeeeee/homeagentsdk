@@ -136,15 +136,41 @@ Supports both **Go** and **Lua** plugin languages.
 
 ```json
 {
-  "name": "my-plugin",
+  "name": "weather",
+  "name_zh": "天气查询",
+  "name_en": "Weather",
   "version": "1.0.0",
-  "lang": "go",
-  "entry": "main.go",
-  "description": "Plugin description",
-  "channels": ["my-channel"],
-  "dependencies": {}
+  "description": "Weather plugin",
+  "author": "HomeAgent",
+  "entry": "plugin.so",
+  "tags": ["weather", "forecast"],
+  "targets": "linux/amd64,windows/amd64",
+  "outdir": "dist",
+  "bundle": true,
+  "replaces": {
+    "github.com/example/pkg": "../local/pkg"
+  },
+  "source_dirs": [
+    "../shared-lib"
+  ]
 }
 ```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | string | Plugin identifier |
+| `name_zh` | string | Chinese name |
+| `name_en` | string | English name |
+| `version` | string | Version |
+| `description` | string | Plugin description |
+| `author` | string | Author |
+| `entry` | string | Entry file (`plugin.so` / `main.lua`) |
+| `tags` | string[] | Tags |
+| `targets` | string | Build targets, comma-separated (e.g. `linux/amd64,windows/amd64`) |
+| `outdir` | string | Output directory (default `dist`) |
+| `bundle` | bool | Bundle mode (build all platforms at once) |
+| `replaces` | object | Go module replacements, key=module path, value=local path |
+| `source_dirs` | string[] | Additional source search paths (auto-imported at build time) |
 
 ### .hmap Package Format
 

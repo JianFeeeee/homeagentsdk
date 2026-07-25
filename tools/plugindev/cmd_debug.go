@@ -6,6 +6,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/JianFeeeee/homeagent-sdk/tools/plugindev/yaegi"
 )
 
 // tmplLuaDebug is the temporary Lua debug script template
@@ -58,22 +60,52 @@ end
 repl()
 `
 
+type DebugConfig struct {
+	Dir      string
+	Replaces []string
+}
+
 func cmdDebug(args []string) {
-	dir := "."
-	if len(args) > 0 && args[0] != "" {
-		dir = args[0]
+	cfg := DebugConfig{Dir: "."}
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--replace", "-R":
+			if i+1 < len(args) {
+				cfg.Replaces = append(cfg.Replaces, args[i+1]); i++
+			}
+		default:
+			if !strings.HasPrefix(args[i], "-") {
+				cfg.Dir = args[i]
+			}
+		}
 	}
 
+	dir := cfg.Dir
 	luaPath := filepath.Join(dir, "main.lua")
-	goPath := filepath.Join(dir, "main.go")
 	sdkPath := filepath.Join(dir, "sdk.lua")
+	hasGo := false
+
+	entries, _ := os.ReadDir(dir)
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".go") && !strings.HasSuffix(e.Name(), "_test.go") {
+			hasGo = true
+			break
+		}
+	}
+
+	// Merge plg.json replaces with CLI --replace overrides
+	var replaces []string
+	if plg, err := readPlgJSON(filepath.Join(dir, "plg.json")); err == nil {
+		replaces = plg.ReplacesToSlice()
+	}
+	replaces = append(replaces, cfg.Replaces...)
 
 	if _, err := os.Stat(luaPath); err == nil {
 		debugLua(dir, sdkPath, luaPath)
-	} else if _, err := os.Stat(goPath); err == nil {
-		debugGo(dir, goPath)
+	} else if hasGo {
+		debugGo(dir, replaces)
 	} else {
-		fmt.Println("error: no main.lua or main.go found in", dir)
+		fmt.Println("error: no main.lua or .go files found in", dir)
 		os.Exit(1)
 	}
 }
@@ -120,15 +152,43 @@ func debugLua(dir, sdkPath, luaPath string) {
 	}
 }
 
-func debugGo(dir, goPath string) {
-	fmt.Println("Go debug mode: use standard Go tooling")
-	fmt.Println()
-	fmt.Println("  go test -v ./...    # run tests")
-	fmt.Println("  go build -o plugin.so -buildmode=plugin .  # build plugin")
-	fmt.Println("  plugindev build     # package as .hmap")
-	fmt.Println()
-	fmt.Println("For interactive Go debugging, use your IDE or dlv:")
-	fmt.Println("  dlv debug          # Delve debugger")
+func debugGo(dir string, replaces []string) {
+	debug, err := yaegi.NewGoPluginDebug(dir, replaces)
+	if err != nil {
+		fmt.Printf("error: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("[debug] Plugin dir: %s\n", dir)
+
+	// Clean any stale debug harness
+	debug.Cleanup()
+
+	// Try Yaegi interpreter first (fast, no compilation)
+	if err := debug.DebugWithYaegi(); err != nil {
+		// Fall back to go run with generated debug harness
+		// Apply third-party replace directives before go run
+		patcher := NewGoModPatcher(dir, replaces)
+		restore, pErr := patcher.Apply()
+		if pErr != nil {
+			fmt.Printf("[debug] warn: apply replaces: %v\n", pErr)
+		}
+
+		if _, genErr := debug.GenerateDebugMain(); genErr != nil {
+			restore()
+			fmt.Printf("[debug] generate fallback: %v\n", genErr)
+			os.Exit(1)
+		}
+
+		runErr := debug.DebugWithGoRun()
+		debug.Cleanup()
+		restore()
+
+		if runErr != nil {
+			fmt.Printf("[debug] go run failed: %v\n", runErr)
+			os.Exit(1)
+		}
+	}
 }
 
 var _ = strings.TrimSpace
