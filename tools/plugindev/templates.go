@@ -279,9 +279,11 @@ func main() {}
 `
 
 // tmplCABIHeader — shared C ABI type definitions for both core and plugin
+// 此模板中的常量应与 core/internal/meta/meta.go 保持一致（ABI 版本、dispatch method IDs）。
 const tmplCABIHeader = `
 #ifndef HOMEAGENT_CABI_H
 #define HOMEAGENT_CABI_H
+// HOMEAGENT_ABI_VERSION 与 sdk/meta/meta.go ABIVersion 同步
 #define HOMEAGENT_ABI_VERSION 1
 #ifdef __cplusplus
 extern "C" {

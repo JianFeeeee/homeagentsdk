@@ -6,9 +6,9 @@ import (
 	"path/filepath"
 	"strings"
 	"text/template"
-)
 
-const cabiVersion = 1
+	"gitcode.com/JianFeeeee/homeagent-sdk/meta"
+)
 
 type PlgConfig struct {
 	Name        string   `json:"name"`
@@ -84,7 +84,7 @@ func cmdInit(args []string) {
 			Targets:     targets,
 		},
 		IsLua:       isLua,
-		CABIVersion: cabiVersion,
+		CABIVersion: meta.ABIVersion,
 		CABIHeader:  tmplCABIHeader,
 	}
 

@@ -1,3 +1,7 @@
 module github.com/JianFeeeee/homeagent-sdk/tools/plugindev
 
-go 1.21
+go 1.25.0
+
+require gitcode.com/JianFeeeee/homeagent-sdk v0.0.0
+
+replace gitcode.com/JianFeeeee/homeagent-sdk => ../../
