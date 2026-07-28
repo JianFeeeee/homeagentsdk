@@ -390,6 +390,7 @@ var (
 	coreAPI    unsafe.Pointer
 
 	handlerMu   sync.RWMutex
+	coreAPIMu   sync.RWMutex
 	toolHandlers  = map[string]sdk.ToolHandler{}
 	stageHandlers = map[string]sdk.StageHandler{}
 	outputHandlers = map[string]sdk.ToolHandler{}
@@ -398,29 +399,35 @@ var (
 // ---- CoreAPI dispatch helpers ----
 
 func callVoid(methodID int, s1, s2, s3 string, i1, i2 int) error {
+	coreAPIMu.RLock()
+	api := coreAPI
+	coreAPIMu.RUnlock()
 	var c1, c2, c3 *C.char
 	if s1 != "" { c1 = C.CString(s1); defer C.free(unsafe.Pointer(c1)) }
 	if s2 != "" { c2 = C.CString(s2); defer C.free(unsafe.Pointer(c2)) }
 	if s3 != "" { c3 = C.CString(s3); defer C.free(unsafe.Pointer(c3)) }
 	var cErr *C.char
-	if C.ha_dispatch(C.int(methodID), coreAPI, c1, c2, c3, C.int(i1), C.int(i2), nil, &cErr) != 0 && cErr != nil {
+	if C.ha_dispatch(C.int(methodID), api, c1, c2, c3, C.int(i1), C.int(i2), nil, &cErr) != 0 && cErr != nil {
 		return fmt.Errorf("%s", C.GoString(cErr))
 	}
 	return nil
 }
 
 func callString(methodID int, s1, s2, s3 string, i1, i2 int) (string, error) {
+	coreAPIMu.RLock()
+	api := coreAPI
+	coreAPIMu.RUnlock()
 	var c1, c2, c3 *C.char
 	if s1 != "" { c1 = C.CString(s1); defer C.free(unsafe.Pointer(c1)) }
 	if s2 != "" { c2 = C.CString(s2); defer C.free(unsafe.Pointer(c2)) }
 	if s3 != "" { c3 = C.CString(s3); defer C.free(unsafe.Pointer(c3)) }
 	var strResult, cErr *C.char
-	if C.ha_dispatch(C.int(methodID), coreAPI, c1, c2, c3, C.int(i1), C.int(i2), &strResult, &cErr) != 0 && cErr != nil {
+	if C.ha_dispatch(C.int(methodID), api, c1, c2, c3, C.int(i1), C.int(i2), &strResult, &cErr) != 0 && cErr != nil {
 		return "", fmt.Errorf("%s", C.GoString(cErr))
 	}
 	if strResult != nil {
 		result := C.GoString(strResult)
-		C.ha_dispatch(C.int(25), coreAPI, strResult, nil, nil, 0, 0, nil, nil)
+		C.ha_dispatch(C.int(25), api, strResult, nil, nil, 0, 0, nil, nil)
 		return result, nil
 	}
 	return "", nil
@@ -571,7 +578,9 @@ func go_init_plugin(name *C.char, configJSON *C.char, errorOut **C.char) C.int {
 func go_start_plugin(coreAPIptr unsafe.Pointer, coreVersion C.int, errorOut **C.char) C.int {
 	mu.Lock()
 	plg := currentPlg
+	coreAPIMu.Lock()
 	coreAPI = coreAPIptr
+	coreAPIMu.Unlock()
 	mu.Unlock()
 	_ = coreVersion
 	if plg == nil { *errorOut = C.CString("not initialized"); return 1 }
@@ -585,7 +594,9 @@ func go_stop_plugin(errorOut **C.char) C.int {
 	mu.Lock()
 	plg := currentPlg
 	currentPlg = nil
+	coreAPIMu.Lock()
 	coreAPI = nil
+	coreAPIMu.Unlock()
 	mu.Unlock()
 	if plg != nil {
 		if err := plg.Stop(); err != nil { *errorOut = C.CString(err.Error()); return 1 }

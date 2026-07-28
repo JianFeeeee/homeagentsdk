@@ -117,7 +117,7 @@ Triple 数据结构新增字段：
 func New(name string, sett SettingsAPI, regTool ToolRegistrar, regStage StageRegistrar, regAPI APIRegistrar, regOutput OutputChannelRegistrar) *PluginSDK
 ```
 
-插件开发者只需实现 `Plugin` 接口并导出 `NewPlugin()` 入口函数。
+插件开发者只需实现 `Plugin` 接口并导出 `NewPluginFactory()` 入口函数。
 
 ## plugindev 工具链
 
@@ -125,12 +125,24 @@ func New(name string, sett SettingsAPI, regTool ToolRegistrar, regStage StageReg
 
 | 命令 | 说明 |
 |------|------|
-| `plugindev init` | 初始化插件项目（生成 plg.json、入口模板） |
-| `plugindev build` | 构建插件，输出 .hmap 包 |
-| `plugindev clean` | 清理构建产物 |
-| `plugindev debug` | 本地调试模式运行插件 |
+| `plugindev init <name> [--lua]` | 初始化插件项目（生成 plg.json、plugin.go 或 main.lua、go.mod、README.md） |
+| `plugindev build [flags]` | 编译并打包为 `.hmap` 包（支持跨平台编译和 bundle 模式） |
+| `plugindev clean` | 清理 `build/`、`dist/` 目录及生成文件（plugin.json、z_bridge_gen.go） |
+| `plugindev debug [dir]` | 通过 Yaegi Go 解释器加载插件源码，启动交互式 REPL 调试 |
+| `plugindev sdk <command>` | SDK 版本管理（子命令：list/install/use/path/current/latest） |
 
 支持 **Go** 和 **Lua** 两种插件语言。
+
+### build 命令 flags
+
+| Flag | 说明 |
+|------|------|
+| `--outdir <dir>` | 输出目录（默认 `dist`，可覆盖 plg.json 中的 `outdir`） |
+| `--target <os/arch>` | 构建目标（如 `linux/amd64`），可重复指定（追加到 plg.json 中的 targets） |
+| `--bundle` | 强制 bundle 模式（同时编译 linux/amd64, darwin/amd64, windows/amd64） |
+| `--no-bundle` | 关闭 bundle 模式，仅按 targets 逐个编译 |
+| `--sdk-path <path>` | 指定 SDK 源码路径（覆盖 plg.json 中的 `sdk_path`） |
+| `--replace <from=to>` / `-R` | Go 模块替换（追加到 plg.json 中的 replaces），`from` 为模块路径，`to` 为本地路径 |
 
 ### plg.json 清单格式
 
@@ -164,13 +176,15 @@ func New(name string, sett SettingsAPI, regTool ToolRegistrar, regStage StageReg
 | `version` | string | 版本号 |
 | `description` | string | 插件描述 |
 | `author` | string | 作者 |
-| `entry` | string | 入口文件（`plugin.so` / `main.lua`） |
+| `entry` | string | 入口文件（`plugin.so` / `plugin.dll` / `main.lua`） |
 | `tags` | string[] | 标签 |
-| `targets` | string | 构建目标，逗号分隔（如 `linux/amd64,windows/amd64`） |
+| `targets` | string | 构建目标，逗号分隔（如 `linux/amd64,windows/amd64`，Lua 插件为 `lua`） |
 | `outdir` | string | 输出目录（默认 `dist`） |
-| `bundle` | bool | 是否 bundle 模式（同时编译多平台） |
+| `bundle` | bool | 是否 bundle 模式（同时编译多平台，默认 `true`） |
+| `sdk_path` | string | SDK 源码路径（覆盖自动检测的 SDK 路径） |
+| `go_version` | string | Go 版本（如 `1.21`，默认从 SDK 的 go.mod 读取） |
 | `replaces` | object | Go 模块替换，key=模块路径，value=本地路径 |
-| `source_dirs` | string[] | 额外源码搜索路径（编译时自动导入） |
+| `source_dirs` | string[] | 额外源码搜索路径（编译时自动导入，用于引入 `thirdpart/` 外部的共享代码） |
 
 ### .hmap 包格式
 
@@ -179,9 +193,33 @@ func New(name string, sett SettingsAPI, regTool ToolRegistrar, regStage StageReg
 - `plugin.json` — 插件元数据
 - `plugin.so` — Go 编译产物（Linux）
 - `plugin.dll` — Go 编译产物（Windows）
+- `plugin.dylib` — Go 编译产物（macOS，bundle 模式）
 - `main.lua` — Lua 插件入口（Lua 插件时）
 
 ## 插件生命周期
+
+### 入口函数
+
+插件必须导出 `NewPluginFactory` 入口函数（Go）或 `start()` 函数（Lua）：
+
+**Go 插件** — 实现 `Plugin` 接口并导出工厂函数：
+
+```go
+func NewPluginFactory(name string, config map[string]interface{}) (sdk.Plugin, error) {
+    return &Plugin{name: name}, nil
+}
+```
+
+该函数由内核在加载插件时调用，`name` 为插件名，`config` 为 `skill.json` 中的配置（如有）。
+
+**Lua 插件** — 返回包含 `start(sdk)` 和 `stop()` 方法的 table：
+
+```lua
+local plugin = { name = "my-plugin" }
+function plugin.start(sdk) -- 注册工具等 end
+function plugin.stop() end
+return plugin
+```
 
 ### 启动与停止
 
@@ -214,14 +252,19 @@ enabled := sdk.AutoRestart()
 | 插件 | 说明 |
 |------|------|
 | a2a | Agent-to-Agent 协议通信 |
+| ai_image | AI 图片生成 |
 | bili | Bilibili 视频下载 |
-| browser | 网络搜索、网页抓取、浏览器渲染（合并自 web/webfetch） |
+| browser | 网络搜索、网页抓取、浏览器渲染 |
+| calendar | 日历管理 |
 | editdoc | 文档编辑 |
 | files | 文件管理 |
-| memo | 备忘录/记忆 |
+| memo | 备忘录 |
+| music | 音乐播放 |
 | ocr | 光学字符识别 |
-| qq | QQ 消息集成 |
+| qq | QQ 消息集成（NapCat webhook，15 个工具） |
+| rss | RSS 订阅 |
 | sanitizer | 内容清洗/安全过滤 |
+| weather | 天气查询（wttr.in） |
 
 ## 构建与安装
 

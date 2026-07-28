@@ -30,7 +30,7 @@ func (p *GoModPatcher) Apply() (func(), error) {
 	p.backup = string(data)
 
 	var sb strings.Builder
-	sb.WriteString(strings.TrimRight(string(data), "\n"))
+	sb.WriteString(strings.TrimRight(string(data), "\r\n"))
 	sb.WriteString("\n")
 	for _, r := range p.replaces {
 		from, to, found := strings.Cut(r, "=")

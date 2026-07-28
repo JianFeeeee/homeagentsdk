@@ -345,23 +345,23 @@ func New(name string) *PluginSDK {
 
 func (s *PluginSDK) RegisterTool(name string, def ToolDef, handler ToolHandler) {
 	logf("register_tool: %s", name)
-	mu.Lock()
-	defer mu.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.toolDefs[name] = def
 	s.toolHandlers[name] = handler
 }
 
 func (s *PluginSDK) RegisterStage(stage Stage, handler StageHandler) {
 	logf("register_stage: %s", string(stage))
-	mu.Lock()
-	defer mu.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.stageHandlers[string(stage)] = handler
 }
 
 func (s *PluginSDK) RegisterOutputChannel(name string, caps int, desc string, handler ToolHandler) {
 	logf("register_output_channel: %s", name)
-	mu.Lock()
-	defer mu.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.outChannels[name] = handler
 }
 
@@ -370,9 +370,9 @@ func (s *PluginSDK) RegisterPluginAPI(name string) {
 }
 
 func (s *PluginSDK) CallTool(name string, args map[string]interface{}) (interface{}, error) {
-	mu.Lock()
+	s.mu.RLock()
 	handler, ok := s.toolHandlers[name]
-	mu.Unlock()
+	s.mu.RUnlock()
 	if !ok {
 		return nil, fmt.Errorf("tool not found: %s", name)
 	}
@@ -380,9 +380,9 @@ func (s *PluginSDK) CallTool(name string, args map[string]interface{}) (interfac
 }
 
 func (s *PluginSDK) CallStage(stage string, ctx *StageContext) error {
-	mu.Lock()
+	s.mu.RLock()
 	handler, ok := s.stageHandlers[stage]
-	mu.Unlock()
+	s.mu.RUnlock()
 	if !ok {
 		return nil
 	}
@@ -390,8 +390,8 @@ func (s *PluginSDK) CallStage(stage string, ctx *StageContext) error {
 }
 
 func (s *PluginSDK) ListTools() []ToolDef {
-	mu.Lock()
-	defer mu.Unlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	defs := make([]ToolDef, 0, len(s.toolDefs))
 	for _, def := range s.toolDefs {
 		defs = append(defs, def)

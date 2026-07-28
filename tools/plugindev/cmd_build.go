@@ -284,22 +284,29 @@ func ensureGoMod(plg *PlgConfig, sdkPath string) {
 		return
 	}
 
-	// 检查是否已有 replace 指令
 	absSDK, _ := filepath.Abs(sdkPath)
 	absSDK = strings.ReplaceAll(absSDK, "\\", "/")
+
+	// Remove any existing replace line for this module (even if path differs)
+	var keep []string
+	replaceLine := fmt.Sprintf("replace %s => %s", sdkModule, absSDK)
+	alreadyExists := false
 	for _, line := range lines {
-		if strings.Contains(line, "replace") && strings.Contains(line, sdkModule) {
+		if strings.HasPrefix(strings.TrimSpace(line), "replace ") &&
+			strings.Contains(line, sdkModule) {
 			parts := strings.Fields(line)
 			if len(parts) >= 3 && strings.ReplaceAll(parts[2], "\\", "/") == absSDK {
-				return // 已存在且路径正确
+				alreadyExists = true
 			}
+			continue // strip any existing replace for this module
 		}
+		keep = append(keep, line)
 	}
-
-	// 追加 replace 指令
-	replaceLine := fmt.Sprintf("replace %s => %s", sdkModule, absSDK)
-	newData := string(data) + "\n" + replaceLine + "\n"
-	if err := os.WriteFile(gomodPath, []byte(newData), 0644); err != nil {
+	if alreadyExists {
+		return
+	}
+	keep = append(keep, replaceLine, "")
+	if err := os.WriteFile(gomodPath, []byte(strings.Join(keep, "\n")), 0644); err != nil {
 		fmt.Printf("  warn: update go.mod replace: %v\n", err)
 	}
 }
@@ -387,7 +394,7 @@ func buildTarget(plg *PlgConfig, target, outDir, sdkPath string) {
 
 	// Auto-generate C ABI bridge (all platforms use c-shared)
 	bridgeCleanup := generateBridge(cfg.goos)
-	_ = bridgeCleanup // DISABLED cleanup for debug
+	defer bridgeCleanup()
 
 	// Auto-link thirdpart/ contents + source_dirs + replace targets
 	thirdpartCleanup := linkThirdpart(plg, target)
@@ -566,33 +573,6 @@ func detectWindowsCC() string {
 
 // stripIncludeGuard strips preprocessor guards and C++ comments from a C header,
 // since these can confuse cgo's type resolution.
-func stripIncludeGuard(header string) string {
-	lines := strings.Split(header, "\n")
-	var out []string
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "#ifndef HOMEAGENT_CABI_H" || trimmed == "#define HOMEAGENT_CABI_H" {
-			continue
-		}
-		if trimmed == "#endif" || strings.HasPrefix(trimmed, "#endif") {
-			continue
-		}
-		if trimmed == "#ifdef __cplusplus" || trimmed == "extern \"C\" {" || trimmed == "}" {
-			continue
-		}
-		// Strip C++-style comments (cgo parser may not handle them in /* */ blocks)
-		if idx := strings.Index(line, "//"); idx >= 0 {
-			line = line[:idx]
-		}
-		cleaned := strings.TrimSpace(line)
-		if cleaned == "" {
-			continue
-		}
-		out = append(out, line)
-	}
-	return strings.Join(out, "\n")
-}
-
 // generateBridge generates the C ABI bridge files for non-Lua builds.
 // Returns a cleanup function to remove generated files.
 func generateBridge(goos string) func() {
@@ -662,7 +642,11 @@ func linkThirdpart(plg *PlgConfig, target string) func() {
 		dirs = append(dirs, "thirdpart")
 	}
 	dirs = append(dirs, plg.SourceDirs...)
-	for _, to := range plg.Replaces {
+	for _, r := range plg.ReplacesToSlice() {
+		_, to, found := strings.Cut(r, "=")
+		if !found {
+			continue
+		}
 		if abs, err := filepath.Abs(to); err == nil {
 			if info, err := os.Stat(abs); err == nil && info.IsDir() {
 				dirs = append(dirs, abs)
@@ -699,24 +683,20 @@ func linkThirdpart(plg *PlgConfig, target string) func() {
 			continue
 		}
 
-		// Determine import path: for relative dirs under module, use module path prefix;
-		// for absolute paths, derive from replace or use package name
-		dirName := filepath.Base(d)
 		if !filepath.IsAbs(d) {
 			importPath := modulePath + "/" + d
 			stubs = append(stubs, importPath)
 		} else {
-			// External directory: use the replace "from" key if found, else use dir name
-			found := false
-			for from, to := range plg.Replaces {
+			// External directory: must be in replaces to get a valid import path
+			for _, r := range plg.ReplacesToSlice() {
+				from, to, found := strings.Cut(r, "=")
+				if !found {
+					continue
+				}
 				if absTo, _ := filepath.Abs(to); absTo == d {
-					stubs = append(stubs, from)
-					found = true
+					stubs = append(stubs, strings.TrimSpace(from))
 					break
 				}
-			}
-			if !found && dirName != "" {
-				stubs = append(stubs, modulePath+"/"+dirName)
 			}
 		}
 	}

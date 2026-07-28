@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 )
 
 const sdkDirName = "plugindev/sdk"
@@ -165,7 +166,8 @@ func cmdSDKInstall(version string) {
 	tmpPath := tmpFile.Name()
 	defer os.Remove(tmpPath)
 
-	resp, err := http.Get(url)
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Get(url)
 	if err != nil {
 		fmt.Printf("error: download SDK %s: %v\n", version, err)
 		os.Exit(1)
@@ -191,12 +193,19 @@ func cmdSDKInstall(version string) {
 	}
 	defer os.RemoveAll(tmpDir)
 
-	gzr, err := gzip.NewReader(openFile(tmpPath))
+	f, err := openFile(tmpPath)
 	if err != nil {
+		fmt.Printf("error: open archive: %v\n", err)
+		os.Exit(1)
+	}
+	gzr, err := gzip.NewReader(f)
+	if err != nil {
+		f.Close()
 		fmt.Printf("error: read archive: %v\n", err)
 		os.Exit(1)
 	}
 	defer gzr.Close()
+	defer f.Close()
 
 	tr := tar.NewReader(gzr)
 	for {
@@ -241,8 +250,12 @@ func cmdSDKInstall(version string) {
 	gzr.Close()
 
 	if err := os.Rename(tmpDir, dest); err != nil {
-		fmt.Printf("error: move SDK to store: %v\n", err)
-		os.Exit(1)
+		// Cross-filesystem rename fallback
+		if err := copyDir(tmpDir, dest); err != nil {
+			fmt.Printf("error: move SDK to store: %v\n", err)
+			os.Exit(1)
+		}
+		os.RemoveAll(tmpDir)
 	}
 
 	fmt.Printf("SDK version %s installed at %s\n", version, dest)
@@ -253,12 +266,12 @@ func cmdSDKInstall(version string) {
 	}
 }
 
-func openFile(path string) *os.File {
+func openFile(path string) (*os.File, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
-	return f
+	return f, nil
 }
 
 // cmdSDKUse switches the active SDK version.
@@ -396,17 +409,19 @@ func compareSemver(a, b string) int {
 	return 0
 }
 
-// parseSemver extracts [major, minor, patch] from a vX.Y.Z string.
+// parseSemver extracts [major, minor, patch] from a vX.Y.Z[-pre] string.
+// Prerelease tags parse to the same major.minor.patch as their release (ignoring prerelease).
 func parseSemver(tag string) [3]int {
 	var v [3]int
 	s := strings.TrimPrefix(tag, "v")
+	// Strip prerelease suffix (-...)
+	if idx := strings.IndexByte(s, '-'); idx >= 0 {
+		s = s[:idx]
+	}
 	parts := strings.SplitN(s, ".", 3)
-	for i, p := range parts {
-		if i >= 3 {
-			break
-		}
+	for i := 0; i < 3 && i < len(parts); i++ {
 		n := 0
-		fmt.Sscanf(p, "%d", &n)
+		fmt.Sscanf(parts[i], "%d", &n)
 		v[i] = n
 	}
 	return v
@@ -431,6 +446,35 @@ func activeSDKRoot() string {
 		os.Exit(1)
 	}
 	return root
+}
+
+// copyDir recursively copies src to dst (cross-filesystem rename fallback).
+func copyDir(src, dst string) error {
+	if err := os.MkdirAll(dst, 0755); err != nil {
+		return err
+	}
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		srcPath := filepath.Join(src, e.Name())
+		dstPath := filepath.Join(dst, e.Name())
+		if e.IsDir() {
+			if err := copyDir(srcPath, dstPath); err != nil {
+				return err
+			}
+		} else {
+			data, err := os.ReadFile(srcPath)
+			if err != nil {
+				return err
+			}
+			if err := os.WriteFile(dstPath, data, 0644); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // readMetaVersion reads the Version string from the SDK's meta/meta.go.
