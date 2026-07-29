@@ -23,7 +23,8 @@ type Plugin interface {
 | 分类 | 方法 | 说明 |
 |------|------|------|
 | 阶段钩子 | `RegisterStage(stage, handler, scope...)` | 注册阶段回调，scope 可选：`StageScopeGlobal`（全局，默认）或 `StageScopeOwnTools`（仅自己工具） |
-| 输出通道 | `RegisterOutputChannel(name, caps, desc, handler)` | 注册输出通道，caps 为能力位掩码 |
+| 输入通道 | `RegisterInputChannel(name, def)` | 注册输入通道，def 为 `ChannelDef`（NoMemory/Cleaner） |
+| 输出通道 | `RegisterOutputChannel(name, caps, desc, def, handler)` | 注册输出通道，def 为 `ChannelDef`，caps 为能力位掩码 |
 | 工具注册 | `RegisterTool(name, def, handler)` | 注册工具供 LLM 调用 |
 | 插件 API | `RegisterPluginAPI(name)` | 注册插件 API 供其他插件访问 |
 | 图记忆 | `Memory()` | 访问图记忆 API（实体-关系存储） |
@@ -47,10 +48,30 @@ sdk.RegisterStage(StagePreAction, func(ctx *StageContext) error { return nil })
 sdk.RegisterStage(StageBeforeToolcall, myHandler, StageScopeOwnTools)
 ```
 
+### ChannelDef
+
+```go
+type ChannelDef struct {
+    NoMemory bool              // 通道输入/输出不参与记忆计算（向量/关键词/蒸馏），原文保留
+    Cleaner  func(string) string // 可选：计算层过滤函数（不改原文）
+}
+```
+
+`ChannelDef` 控制通道在记忆计算层的行为，与 `ToolDef` 的 `NoMemory`/`Cleaner` 语义一致。
+
+### 输入通道
+
+```go
+sdk.RegisterInputChannel("qq", ChannelDef{
+    NoMemory: true,
+    Cleaner:  func(text string) string { return strings.TrimSpace(text) },
+})
+```
+
 ### 输出通道
 
 ```go
-sdk.RegisterOutputChannel("my-channel", CapText|CapFile, "通道描述", handler)
+sdk.RegisterOutputChannel("my-channel", CapText|CapFile, "通道描述", ChannelDef{}, handler)
 ```
 
 handler 接收三个参数：

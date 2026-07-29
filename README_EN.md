@@ -23,7 +23,8 @@ The SDK instance injected via `Start(sdk *PluginSDK)` provides:
 | Category | Method | Description |
 |----------|--------|-------------|
 | Stage Hooks | `RegisterStage(stage, handler, scope...)` | Register stage callback; scope: `StageScopeGlobal` (all, default) or `StageScopeOwnTools` (own tools only) |
-| Output Channel | `RegisterOutputChannel(name, caps, desc, handler)` | Register output channel with capability bitmask |
+| Input Channel | `RegisterInputChannel(name, def)` | Register input channel with `ChannelDef` (NoMemory/Cleaner) |
+| Output Channel | `RegisterOutputChannel(name, caps, desc, def, handler)` | Register output channel with `ChannelDef` and capability bitmask |
 | Tool Registration | `RegisterTool(name, def, handler)` | Register a tool for LLM invocation |
 | Plugin API | `RegisterPluginAPI(name)` | Register plugin API for inter-plugin access |
 | Graph Memory | `Memory()` | Access graph memory API (entity-relation store) |
@@ -47,10 +48,30 @@ sdk.RegisterStage(StagePreAction, func(ctx *StageContext) error { return nil })
 sdk.RegisterStage(StageBeforeToolcall, myHandler, StageScopeOwnTools)
 ```
 
+### ChannelDef
+
+```go
+type ChannelDef struct {
+    NoMemory bool              // Channel input/output skips memory computation (vector/keyword/distill), original text preserved
+    Cleaner  func(string) string // Optional: computation layer filter (does not modify original text)
+}
+```
+
+`ChannelDef` controls channel behavior in the memory computation layer, with the same semantics as `ToolDef.NoMemory`/`Cleaner`.
+
+### Input Channels
+
+```go
+sdk.RegisterInputChannel("qq", ChannelDef{
+    NoMemory: true,
+    Cleaner:  func(text string) string { return strings.TrimSpace(text) },
+})
+```
+
 ### Output Channels
 
 ```go
-sdk.RegisterOutputChannel("my-channel", CapText|CapFile, "channel description", handler)
+sdk.RegisterOutputChannel("my-channel", CapText|CapFile, "channel description", ChannelDef{}, handler)
 ```
 
 The handler receives three arguments:
