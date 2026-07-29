@@ -35,6 +35,14 @@ const (
 	StageAfterOutput    Stage = "after_output"
 )
 
+// ChannelDef 描述通道在记忆计算层的行为，与 ToolDef.NoMemory/Cleaner 语义一致。
+// NoMemory: 此通道输入/输出不参与记忆计算（向量化/关键词提取/蒸馏），但原文保留在上下文中
+// Cleaner:  计算层过滤函数，不改原文；仅在向量化/jieba/蒸馏/存档提取关键词时调用
+type ChannelDef struct {
+	NoMemory bool
+	Cleaner  func(string) string
+}
+
 // StageContext provides context for stage handlers.
 type StageContext struct {
 	mu               sync.RWMutex
@@ -156,8 +164,11 @@ type StageRegistrar func(stage Stage, handler StageHandler)
 // APIRegistrar registers a plugin API for external access.
 type APIRegistrar func(name string) error
 
+// InputChannelRegistrar registers an input channel with its memory behavior.
+type InputChannelRegistrar func(name string, def ChannelDef) error
+
 // OutputChannelRegistrar registers an output channel that the output_send tool can use.
-type OutputChannelRegistrar func(name string, caps int, desc string, handler ToolHandler) error
+type OutputChannelRegistrar func(name string, caps int, desc string, def ChannelDef, handler ToolHandler) error
 
 // Output capability flags
 const (
@@ -176,6 +187,7 @@ type PluginSDK struct {
 	regStage  StageRegistrar
 	regAPI    APIRegistrar
 	regOutput OutputChannelRegistrar
+	regInput  InputChannelRegistrar
 	io        IOInjector
 	mem       MemoryAPI
 	textMem   TextMemoryAPI
@@ -289,16 +301,30 @@ func (s *PluginSDK) RegisterPluginAPI(name string) error {
 // name: channel name (e.g. "qq", "webui")
 // caps: bitmask of supported output capabilities (CapText, CapFile, etc.)
 // desc: description of the channel, expected meta format, and type enum
+// def:  通道在记忆计算层的行为（NoMemory/Cleaner）
 // handler: receives args map with keys: payload (string), type (string), meta (string|optional)
-func (s *PluginSDK) RegisterOutputChannel(name string, caps int, desc string, handler ToolHandler) error {
+func (s *PluginSDK) RegisterOutputChannel(name string, caps int, desc string, def ChannelDef, handler ToolHandler) error {
 	if s.regOutput != nil {
-		return s.regOutput(name, caps, desc, handler)
+		return s.regOutput(name, caps, desc, def, handler)
+	}
+	return nil
+}
+
+// RegisterInputChannel registers an input channel with its memory behavior.
+// def.NoMemory: 此通道输入不参与记忆计算
+// def.Cleaner:  计算层对输入文本清洗后（不改原文）再向量化/提关键词
+func (s *PluginSDK) RegisterInputChannel(name string, def ChannelDef) error {
+	if s.regInput != nil {
+		return s.regInput(name, def)
 	}
 	return nil
 }
 
 // SetOutputChannelRegistrar sets the output channel registrar (called by the core at startup).
 func (s *PluginSDK) SetOutputChannelRegistrar(r OutputChannelRegistrar) { s.regOutput = r }
+
+// SetInputChannelRegistrar sets the input channel registrar (called by the core at startup).
+func (s *PluginSDK) SetInputChannelRegistrar(r InputChannelRegistrar) { s.regInput = r }
 
 // SetIOInjector sets the IO injector (called by the core at startup).
 func (s *PluginSDK) SetIOInjector(io IOInjector) { s.io = io }

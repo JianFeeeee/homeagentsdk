@@ -165,7 +165,28 @@ meta JSON 格式：
   "reply_to": 12345         // 可选，回复指定消息 ID
 }
 type 枚举: text（文字）/ voice（语音转文字后发送）/ image（图片URL）/ file（文件URL）`,
-		p.handleChannelOutput)
+		sdk.ChannelDef{}, p.handleChannelOutput)
+
+	// ---- 注册输入通道（记忆计算层行为） ----
+	inputCleaner := func(text string) string {
+		// 从中断模板中提取语义内容：消息来源和发送者昵称
+		// 模板: 来自「昵称」的私聊/群聊消息(message_id=N)...
+		// 模板: 【重要！老大消息】来自「昵称」...
+		cleaned := text
+		// 去掉模板前缀
+		if strings.HasPrefix(cleaned, "【重要！老大消息】") {
+			cleaned = strings.TrimPrefix(cleaned, "【重要！老大消息】")
+		}
+		// 提取 "来自「XXX」" 中的昵称作为关键词
+		if start := strings.Index(cleaned, "来自「"); start >= 0 {
+			if end := strings.Index(cleaned[start:], "」"); end >= 0 {
+				nick := cleaned[start+len("来自「") : start+end]
+				cleaned = nick
+			}
+		}
+		return cleaned
+	}
+	s.RegisterInputChannel("qq", sdk.ChannelDef{NoMemory: true, Cleaner: inputCleaner})
 
 	// 查询类工具输出清洗器：提取 JSON 中的 content/文本字段参与向量化
 	cleaner := func(output string) string {
