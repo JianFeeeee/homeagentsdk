@@ -9,7 +9,7 @@
   "tags": ["qq", "messaging"],
   "targets": "linux/amd64",
   "outdir": "dist",
-  "bundle": true,
+  "bundle": false,
   "replaces": {},
   "source_dirs": []
 }
