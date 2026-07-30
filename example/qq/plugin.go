@@ -102,6 +102,13 @@ type Plugin struct {
 	agentfsDir     string
 	downloadMu     sync.Mutex
 	downloadTasks  []*DownloadTask
+	typingMu       sync.Mutex
+	typingMap      map[int64]*typingState
+}
+
+type typingState struct {
+	userID int64
+	stopCh chan struct{}
 }
 
 func (p *Plugin) Name() string { return p.name }
@@ -759,6 +766,10 @@ func (p *Plugin) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if evt.MessageType == "private" {
+		p.startTyping(evt.UserID)
+	}
+
 	if p.sdk != nil {
 		p.sdk.InjectInterruptText(p.name, p.name, interrupt)
 	}
@@ -954,6 +965,10 @@ func (p *Plugin) handleChannelOutput(args map[string]interface{}) (interface{}, 
 	}
 	if groupID == 0 && userID == 0 {
 		return nil, fmt.Errorf("meta 中需要 group_id 或 user_id 字段。用 output_send__qq_help 查看格式说明")
+	}
+
+	if userID > 0 {
+		p.stopTyping(userID)
 	}
 
 	switch rawType {
@@ -2137,6 +2152,54 @@ func (p *Plugin) napcat(action string, params map[string]interface{}) (interface
 	return raw, nil
 }
 
+func (p *Plugin) setInputStatus(userID int64, eventType int) (interface{}, error) {
+	return p.napcat("set_input_status", map[string]interface{}{
+		"user_id":    userID,
+		"event_type": eventType,
+	})
+}
+
+func (p *Plugin) startTyping(userID int64) {
+	p.typingMu.Lock()
+	if _, ok := p.typingMap[userID]; ok {
+		p.typingMu.Unlock()
+		return
+	}
+	ts := &typingState{userID: userID, stopCh: make(chan struct{})}
+	p.typingMap[userID] = ts
+	p.typingMu.Unlock()
+	go p.typingLoop(ts)
+}
+
+func (p *Plugin) stopTyping(userID int64) {
+	p.typingMu.Lock()
+	ts, ok := p.typingMap[userID]
+	if ok {
+		delete(p.typingMap, userID)
+	}
+	p.typingMu.Unlock()
+	if ok {
+		close(ts.stopCh)
+	}
+}
+
+func (p *Plugin) typingLoop(ts *typingState) {
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+	timeout := time.After(30 * time.Second)
+	for {
+		select {
+		case <-ticker.C:
+			p.setInputStatus(ts.userID, 1)
+		case <-ts.stopCh:
+			return
+		case <-timeout:
+			p.stopTyping(ts.userID)
+			return
+		}
+	}
+}
+
 // ======== Helpers ========
 
 // rawString extracts a string from napcat's return type (json.RawMessage or string).
@@ -2192,6 +2255,7 @@ func NewPluginFactory(name string, config map[string]interface{}) (sdk.Plugin, e
 		allowFrom:      make(map[int64]struct{}),
 		groupAllowFrom: make(map[int64]struct{}),
 		downloadTasks:  make([]*DownloadTask, 0),
+		typingMap:      make(map[int64]*typingState),
 		dmPolicy:       "open",
 		groupPolicy:    "open",
 	}, nil
