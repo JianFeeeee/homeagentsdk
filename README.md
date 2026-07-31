@@ -142,7 +142,12 @@ func New(name string, sett SettingsAPI, regTool ToolRegistrar, regStage StageReg
 
 ## plugindev 工具链
 
-`plugindev` 提供插件开发全流程支持：
+`plugindev` 提供插件开发全流程支持。仓库 `bin/` 提供各平台预制二进制（linux/darwin/windows × amd64/arm64），下载后直接加入 PATH 即可：
+
+```bash
+curl -o plugindev https://gitcode.com/JianFeeeee/homeagent-sdk/-/raw/main/bin/plugindev_linux_amd64
+chmod +x plugindev
+```
 
 | 命令 | 说明 |
 |------|------|
