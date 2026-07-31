@@ -60,6 +60,17 @@ func (p *Plugin) Start(s *sdk.PluginSDK) error {
 				"units":    map[string]interface{}{"type": "string", "description": "Units: metric (celsius) or imperial (fahrenheit), default metric"},
 			},
 		},
+		// NoMemory: 外部实时数据对记忆计算无长期价值，跳过向量化/关键词提取
+		NoMemory: true,
+		// Cleaner: 工具输出参与记忆计算前先过滤；这里演示用法（保留摘要行）
+		Cleaner: func(output string) string {
+			for _, line := range strings.Split(output, "\n") {
+				if strings.HasPrefix(line, "🌤") {
+					return line
+				}
+			}
+			return output
+		},
 	}, p.handleCurrent)
 
 	s.RegisterTool(tp+"forecast", sdk.ToolDef{
@@ -72,6 +83,7 @@ func (p *Plugin) Start(s *sdk.PluginSDK) error {
 				"units":    map[string]interface{}{"type": "string", "description": "Units: metric or imperial, default metric"},
 			},
 		},
+		NoMemory: true,
 	}, p.handleForecast)
 
 	s.RegisterTool(tp+"set_location", sdk.ToolDef{
@@ -83,7 +95,33 @@ func (p *Plugin) Start(s *sdk.PluginSDK) error {
 			},
 			"required": []string{"location"},
 		},
+		NoMemory: true,
 	}, p.handleSetLocation)
+
+	// 阶段钩子：own_tools 作用域——仅在本插件的工具被调用时触发
+	s.RegisterStage(sdk.StageAfterToolcall, func(ctx *sdk.StageContext) error {
+		ctx.Lock()
+		defer ctx.Unlock()
+		if len(ctx.ToolResults) > 0 {
+			fmt.Printf("[%s] stage after_toolcall(own): %s\n", p.name, ctx.ToolResults[0].Name)
+		}
+		return nil
+	}, sdk.StageScopeOwnTools)
+
+	// 输出通道：把天气结果主动推给用户（如 QQ/WebUI 渠道）
+	if err := s.RegisterOutputChannel(tp+"weather_out", 0, "push weather to user", sdk.ChannelDef{
+		NoMemory: true,
+	}, func(args map[string]interface{}) (interface{}, error) {
+		payload, _ := args["payload"].(string)
+		return map[string]interface{}{"content": "weather pushed: " + payload}, nil
+	}); err != nil {
+		return err
+	}
+
+	// 输入通道：接收天气订阅请求（NoMemory: 通道输入不参与记忆计算）
+	if err := s.RegisterInputChannel(tp+"weather_in", sdk.ChannelDef{NoMemory: true}); err != nil {
+		return err
+	}
 
 	fmt.Printf("[%s] started\n", p.name)
 	return nil
@@ -255,6 +293,15 @@ func (p *Plugin) handleCurrent(args map[string]interface{}) (interface{}, error)
 		tempStr, unitStr, feelsStr, unitStr,
 		cc.Humidity, cc.WindspeedKmph, windUnit, cc.Winddir16Point,
 		obsTime)
+
+	// 文本记忆：每次查询写入一条历史记录（role=tool 便于追溯）
+	if p.sdk.TextMemory() != nil {
+		_ = p.sdk.TextMemory().Append(sdk.TextEvent{
+			Role:    "tool",
+			Content: fmt.Sprintf("weather %s: %s", place, desc),
+			Channel: p.name,
+		})
+	}
 
 	return map[string]interface{}{
 		"content":    result,

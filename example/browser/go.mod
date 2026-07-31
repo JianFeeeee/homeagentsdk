@@ -17,10 +17,10 @@ require (
 	golang.org/x/sys v0.16.0
 )
 
-replace gitcode.com/JianFeeeee/homeagent-sdk => E:/program/homeagent/homeagentsdk
+replace gitcode.com/JianFeeeee/homeagent-sdk => ../../
 
-replace gitcode.com/JianFeeeee/homeagent-sdk => E:/program/homeagent/homeagentsdk
+replace gitcode.com/JianFeeeee/homeagent-sdk => ../../
 
-replace gitcode.com/JianFeeeee/homeagent-sdk => E:/program/homeagent/homeagentsdk
+replace gitcode.com/JianFeeeee/homeagent-sdk => ../../
 
-replace gitcode.com/JianFeeeee/homeagent-sdk => E:/program/homeagent/homeagentsdk
+replace gitcode.com/JianFeeeee/homeagent-sdk => ../../

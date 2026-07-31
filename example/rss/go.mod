@@ -10,8 +10,8 @@ require (
 	golang.org/x/text v0.38.0
 )
 
-replace gitcode.com/JianFeeeee/homeagent-sdk => E:/program/homeagent/homeagentsdk
+replace gitcode.com/JianFeeeee/homeagent-sdk => ../../
 
-replace gitcode.com/JianFeeeee/homeagent-sdk => E:/program/homeagent/homeagentsdk
+replace gitcode.com/JianFeeeee/homeagent-sdk => ../../
 
-replace gitcode.com/JianFeeeee/homeagent-sdk => E:/program/homeagent/homeagentsdk
+replace gitcode.com/JianFeeeee/homeagent-sdk => ../../
