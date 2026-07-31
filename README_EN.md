@@ -232,18 +232,23 @@ Internal plugins (platform built-in) have full SDK access including SocialAPI wr
 
 ## Example Plugins
 
-| Plugin | Description |
-|--------|-------------|
-| a2a | Agent-to-Agent protocol communication |
-| bili | Bilibili data fetching |
-| editdoc | Document editing |
-| files | File management |
-| memo | Memo/notes |
-| ocr | Optical character recognition |
-| qq | QQ messaging integration |
-| sanitizer | Content sanitization/safety filtering |
-| web | Web browsing and interaction |
-| webfetch | Web content fetching |
+| Plugin | Type | Description |
+|--------|------|-------------|
+| [weather](example/weather) | Go | Weather queries (wttr.in); demonstrates NoMemory/Cleaner/stage hooks/channels/text memory |
+| [luademo](example/luademo) | Lua | Full-featured Lua example covering the whole v0.8.0 Lua SDK surface |
+| [qq](example/qq) | Go | QQ messaging integration (NapCat), 17 tools, full input/output channel wiring |
+| [a2a](example/a2a) | Go | Agent-to-Agent protocol communication |
+| [ai_image](example/ai_image) | Go | AI image generation |
+| [bili](example/bili) | Go | Bilibili video downloading |
+| [browser](example/browser) | Go | Web search, page fetching, browser rendering |
+| [calendar](example/calendar) | Go | Calendar management |
+| [editdoc](example/editdoc) | Go | Document editing |
+| [files](example/files) | Go | File management |
+| [memo](example/memo) | Go | Memos (PreAction injection + scheduled reminders) |
+| [music](example/music) | Go | Music playback |
+| [ocr](example/ocr) | Go | Optical character recognition |
+| [rss](example/rss) | Go | RSS subscriptions |
+| [sanitizer](example/sanitizer) | Go | Content sanitization / safety filtering |
 
 ## Building & Installing
 
@@ -253,15 +258,21 @@ Internal plugins (platform built-in) have full SDK access including SocialAPI wr
 plugindev build
 ```
 
-Outputs a `.hmap` package to the project directory.
+Outputs a `.hmap` package to the `dist/` directory (default is the multi-platform bundle; use `plugindev build --no-bundle` for a single-target build).
 
 ### Install
 
-Via pluginmgr HTTP API:
+Via the pluginmgr HTTP API (default port 9876, listening on 127.0.0.1 only, no auth):
 
 ```bash
-curl -X POST http://<host>:<port>/api/plugins/install \
-  -F "package=@my-plugin.hmap"
+# Local path
+curl -X POST http://127.0.0.1:9876/plugins \
+  -H "Content-Type: application/json" \
+  -d '{"path": "/path/to/my-plugin.hmap"}'
+
+# Upload binary directly
+curl -X POST http://127.0.0.1:9876/plugins \
+  --data-binary @dist/my-plugin.hmap
 ```
 
-Or manually place the `.hmap` in the plugin directory and restart the platform.
+Or upload via the WebUI plugin management page, or manually place the `.hmap` in the plugin directory and restart the platform.

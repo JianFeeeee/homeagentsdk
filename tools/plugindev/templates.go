@@ -615,9 +615,9 @@ func (d *dispatchSettings) Plugins() []string {
 
 //export go_init_plugin
 func go_init_plugin(name *C.char, configJSON *C.char, errorOut **C.char) C.int {
-	plg, err := NewPlugin(C.GoString(name), nil)
+	plg, err := NewPluginFactory(C.GoString(name), nil)
 	if err != nil || plg == nil {
-		if err != nil { *errorOut = C.CString(err.Error()) } else { *errorOut = C.CString("NewPlugin returned nil") }
+		if err != nil { *errorOut = C.CString(err.Error()) } else { *errorOut = C.CString("NewPluginFactory returned nil") }
 		return 1
 	}
 	mu.Lock(); currentPlg = plg; mu.Unlock()

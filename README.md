@@ -270,22 +270,23 @@ enabled := sdk.AutoRestart()
 
 ## 示例插件
 
-| 插件 | 说明 |
-|------|------|
-| a2a | Agent-to-Agent 协议通信 |
-| ai_image | AI 图片生成 |
-| bili | Bilibili 视频下载 |
-| browser | 网络搜索、网页抓取、浏览器渲染 |
-| calendar | 日历管理 |
-| editdoc | 文档编辑 |
-| files | 文件管理 |
-| memo | 备忘录 |
-| music | 音乐播放 |
-| ocr | 光学字符识别 |
-| qq | QQ 消息集成（NapCat webhook，15 个工具） |
-| rss | RSS 订阅 |
-| sanitizer | 内容清洗/安全过滤 |
-| weather | 天气查询（wttr.in） |
+| 插件 | 类型 | 说明 |
+|------|------|------|
+| [weather](example/weather) | Go | 天气查询（wttr.in），演示 NoMemory/Cleaner/阶段钩子/通道/文本记忆 |
+| [luademo](example/luademo) | Lua | Lua 全功能示例，覆盖 v0.8.0 Lua SDK 全部 API 面 |
+| [qq](example/qq) | Go | QQ 消息集成（NapCat），17 个工具，输入/输出通道完整对接 |
+| [a2a](example/a2a) | Go | Agent-to-Agent 协议通信 |
+| [ai_image](example/ai_image) | Go | AI 图片生成 |
+| [bili](example/bili) | Go | Bilibili 视频下载 |
+| [browser](example/browser) | Go | 网络搜索、网页抓取、浏览器渲染 |
+| [calendar](example/calendar) | Go | 日历管理 |
+| [editdoc](example/editdoc) | Go | 文档编辑 |
+| [files](example/files) | Go | 文件管理 |
+| [memo](example/memo) | Go | 备忘录（PreAction 注入 + 定时提醒） |
+| [music](example/music) | Go | 音乐播放 |
+| [ocr](example/ocr) | Go | 光学字符识别 |
+| [rss](example/rss) | Go | RSS 订阅 |
+| [sanitizer](example/sanitizer) | Go | 内容清洗/安全过滤 |
 
 ## 构建与安装
 
@@ -295,15 +296,21 @@ enabled := sdk.AutoRestart()
 plugindev build
 ```
 
-输出 `.hmap` 包到项目目录。
+输出 `.hmap` 包到 `dist/` 目录（默认 bundle 多平台合集；单平台构建使用 `plugindev build --no-bundle`）。
 
 ### 安装
 
-通过 pluginmgr HTTP API 安装：
+通过 pluginmgr HTTP API 安装（端口默认 9876，仅监听 127.0.0.1，无鉴权）：
 
 ```bash
-curl -X POST http://<host>:<port>/api/plugins/install \
-  -F "package=@my-plugin.hmap"
+# 本地路径
+curl -X POST http://127.0.0.1:9876/plugins \
+  -H "Content-Type: application/json" \
+  -d '{"path": "/path/to/my-plugin.hmap"}'
+
+# 直接上传二进制
+curl -X POST http://127.0.0.1:9876/plugins \
+  --data-binary @dist/my-plugin.hmap
 ```
 
-或手动将 `.hmap` 放入插件目录后重启平台。
+或通过 WebUI 插件管理页面上传，也可手动将 `.hmap` 放入插件目录后重启平台。
