@@ -19,8 +19,6 @@ const tmplGoMod = `module {{.ModulePath}}
 go {{.GoVersion}}
 
 require {{.SDKModule}} {{.SDKVersion}}
-
-replace {{.SDKModule}} => {{.SDKReplace}}
 `
 
 const tmplPluginGo = `package main

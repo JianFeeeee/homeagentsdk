@@ -61,7 +61,6 @@ type TemplateData struct {
 	GoVersion  string
 	SDKModule  string
 	SDKVersion string
-	SDKReplace string
 
 	// C ABI
 	CABIVersion int
@@ -118,19 +117,15 @@ func cmdInit(args []string) {
 		CABIHeader:  tmplCABIHeader,
 	}
 
-	// Detect SDK info for Go plugin go.mod
+	// Detect SDK info for Go plugin go.mod.
+	// 生成的 go.mod 只 require SDK 线上模块版本，不写本地路径 replace；
+	// 本地调试请用 `plugindev build --sdk-path <path>` 或手动加 replace。
 	if !isLua {
-		sdkMod, goVer, sdkPath, sdkVer := detectSDKInfo()
-		sdkReplace := sdkPath
-		// Make replace path absolute and use forward slashes
-		if abs, err := filepath.Abs(sdkPath); err == nil {
-			sdkReplace = strings.ReplaceAll(abs, "\\", "/")
-		}
+		sdkMod, goVer, _, sdkVer := detectSDKInfo()
 		data.ModulePath = name
 		data.GoVersion = goVer
 		data.SDKModule = sdkMod
 		data.SDKVersion = "v" + sdkVer
-		data.SDKReplace = sdkReplace
 	}
 
 	if err := os.MkdirAll(dir, 0755); err != nil {

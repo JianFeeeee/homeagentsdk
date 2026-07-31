@@ -66,7 +66,21 @@ func cmdBuild(args []string) {
 	}
 
 	// Ensure go.mod exists with correct SDK path
-	ensureGoMod(plg, sdkPath)
+	sdkModule := ensureGoMod(plg, sdkPath)
+
+	// First build: fetch the SDK module (generates go.sum with zip hash)
+	if sdkModule != "" {
+		if _, err := os.Stat("go.sum"); os.IsNotExist(err) {
+			dl := exec.Command("go", "mod", "download", sdkModule)
+			dl.Env = os.Environ()
+			dl.Stdout = os.Stdout
+			dl.Stderr = os.Stderr
+			fmt.Println("  downloading SDK module deps...")
+			if err := dl.Run(); err != nil {
+				fmt.Printf("  error: go mod download: %v\n", err)
+			}
+		}
+	}
 
 	// Merge plg.json replaces + CLI overrides
 	replaceSlice := plg.ReplacesToSlice()
@@ -246,42 +260,49 @@ func resolveBuild(target string) (*buildConfig, string) {
 
 // ensureGoMod 确保插件项目的 go.mod 包含 SDK 的 replace 指令。
 // 如果 go.mod 不存在或已有正确 replace，则跳过。
-func ensureGoMod(plg *PlgConfig, sdkPath string) {
-	if sdkPath == "" {
-		// 从 plugindev 自身推断 SDK 路径
-		self, err := os.Executable()
-		if err != nil {
-			return
-		}
-		cand := filepath.Dir(filepath.Dir(filepath.Dir(self)))
-		if _, err := os.Stat(filepath.Join(cand, "sdk", "plugin.go")); err != nil {
-			return
-		}
-		sdkPath = cand
-	}
-
+func ensureGoMod(plg *PlgConfig, sdkPath string) string {
 	gomodPath := "go.mod"
 	data, err := os.ReadFile(gomodPath)
 	if err != nil {
-		return // no go.mod, skip
+		return "" // no go.mod, skip
 	}
 
 	lines := strings.Split(string(data), "\n")
 	var sdkModule string
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "require ") || strings.HasPrefix(line, "require (") {
+		if line == "" || strings.HasPrefix(line, "//") {
 			continue
 		}
-		if strings.Contains(line, "homeagent-sdk/sdk") || strings.Contains(line, "homeagent-sdk") {
+		var mod string
+		if strings.HasPrefix(line, "require ") {
 			parts := strings.Fields(line)
-			if len(parts) >= 1 && !strings.HasPrefix(parts[0], "//") && !strings.HasPrefix(parts[0], "replace") {
-				sdkModule = parts[0]
+			if len(parts) >= 2 {
+				mod = parts[1]
 			}
+		} else if !strings.HasPrefix(line, "require") &&
+			!strings.HasPrefix(line, "module ") &&
+			!strings.HasPrefix(line, "go ") &&
+			!strings.HasPrefix(line, "replace ") {
+			// require 块内行（无前缀）或 import 行
+			parts := strings.Fields(line)
+			if len(parts) >= 1 {
+				mod = parts[0]
+			}
+		}
+		if mod != "" && strings.Contains(mod, "homeagent-sdk") {
+			sdkModule = mod
+			break
 		}
 	}
 	if sdkModule == "" {
-		return
+		return ""
+	}
+
+	if sdkPath == "" {
+		// 仅显式配置（plg.json sdk_path 或 --sdk-path）才写入 replace，
+		// 避免 go.mod 中出现本地绝对路径。
+		return sdkModule
 	}
 
 	absSDK, _ := filepath.Abs(sdkPath)
@@ -303,12 +324,13 @@ func ensureGoMod(plg *PlgConfig, sdkPath string) {
 		keep = append(keep, line)
 	}
 	if alreadyExists {
-		return
+		return sdkModule
 	}
 	keep = append(keep, replaceLine, "")
 	if err := os.WriteFile(gomodPath, []byte(strings.Join(keep, "\n")), 0644); err != nil {
 		fmt.Printf("  warn: update go.mod replace: %v\n", err)
 	}
+	return sdkModule
 }
 
 func resolveSDKPath(sdkPath string) string {

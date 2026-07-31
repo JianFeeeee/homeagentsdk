@@ -25,3 +25,6 @@ z_entry.c
 # Pre-built plugindev binaries in bin/ should be tracked
 !bin/plugindev*
 !bin/*.exe
+
+# plugindev binary in tools/
+tools/plugindev/plugindev
