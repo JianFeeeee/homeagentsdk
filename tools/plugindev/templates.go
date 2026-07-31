@@ -74,13 +74,55 @@ const tmplSDKLua = `-- HomeAgent Lua Plugin SDK (standalone mock)
 sdk = {}
 function sdk.log(level, msg) print("[lua-plugin] " .. tostring(level) .. ": " .. tostring(msg)) end
 function sdk.register_tool(name, def, handler) print("[lua-plugin] register_tool: " .. tostring(name)) end
-function sdk.register_stage(stage, handler) print("[lua-plugin] register_stage: " .. tostring(stage)) end
+function sdk.register_stage(stage, handler, scope) print("[lua-plugin] register_stage: " .. tostring(stage) .. " scope=" .. tostring(scope)) end
 function sdk.register_api(name) print("[lua-plugin] register_api: " .. tostring(name)) end
+function sdk.register_output_channel(name, caps, desc, def, handler) print("[lua-plugin] register_output_channel: " .. tostring(name)) end
+function sdk.register_input_channel(name, def) print("[lua-plugin] register_input_channel: " .. tostring(name)) end
 function sdk.get_setting(key) return nil end
 function sdk.set_setting(key, value) print("[lua-plugin] set_setting: " .. tostring(key)) end
 function sdk.inject_text(source, channel, text) print("[lua-plugin] inject_text: " .. tostring(source)) end
 function sdk.inject_interrupt(source, channel, text) print("[lua-plugin] inject_interrupt: " .. tostring(source)) end
 function sdk.inject_text_no_memory(source, channel, text) print("[lua-plugin] inject_text_no_memory: " .. tostring(source)) end
+function sdk.set_auto_restart(enabled) print("[lua-plugin] set_auto_restart: " .. tostring(enabled)) end
+sdk.memory = {}
+function sdk.memory.recall(query, depth) return {entities={}, relations={}} end
+function sdk.memory.commit(triples) return nil end
+function sdk.memory.introspect() return {} end
+function sdk.memory.merge(source, target) return 0 end
+function sdk.memory.purge(criteria, hard) return 0 end
+sdk.doc = {}
+function sdk.doc.query(text, top_k) return {} end
+function sdk.doc.insert(doc) return nil end
+function sdk.doc.remove(id) return nil end
+function sdk.doc.stats() return {} end
+sdk.knowledge = {}
+function sdk.knowledge.search(query, limit) return {} end
+function sdk.knowledge.add(tag, content) return nil end
+function sdk.knowledge.list() return {} end
+sdk.text_memory = {}
+function sdk.text_memory.append(evt) return nil end
+sdk.llm = {}
+function sdk.llm.list_sources() return {} end
+function sdk.llm.set_source(name) return nil end
+function sdk.llm.current_source() return nil end
+sdk.social = {}
+function sdk.social.get_person(name) return {} end
+function sdk.social.get_network(name, depth) return {} end
+function sdk.social.get_trait(name, trait) return {value=nil, found=false} end
+function sdk.social.get_relations(name) return {} end
+function sdk.social.list_persons() return {} end
+sdk.settings = {}
+function sdk.settings.get_core(key) return nil end
+function sdk.settings.set_core(key, value) return nil end
+function sdk.settings.list_core(prefix) return {} end
+function sdk.settings.get_plugin(plugin, key) return nil end
+function sdk.settings.set_plugin(plugin, key, value) return nil end
+function sdk.settings.list_plugin(plugin, prefix) return {} end
+function sdk.settings.list(prefix) return {} end
+function sdk.settings.register_def(def) return nil end
+function sdk.settings.defs(prefix) return {} end
+function sdk.settings.dump() return {} end
+function sdk.settings.plugins() return {} end
 sdk.json = {}
 function sdk.json.encode(val)
     if type(val) == "string" then return '"' .. val:gsub('"', '\\"'):gsub('\n', '\\n') .. '"'
@@ -179,8 +221,9 @@ func StartPlugin(handle unsafe.Pointer) C.int {
 		},
 		func(stage sdk.Stage, handler sdk.StageHandler) { bs.stages[string(stage)] = handler },
 		func(name string) error { return nil },
-		func(name string, caps int, desc string, handler sdk.ToolHandler) error { return nil },
+		func(name string, caps int, desc string, def sdk.ChannelDef, handler sdk.ToolHandler) error { return nil },
 	)
+	mockSDK.SetInputChannelRegistrar(func(name string, def sdk.ChannelDef) error { return nil })
 	if err := bs.plugin.Start(mockSDK); err != nil { return 1 }
 	return 0
 }
@@ -356,6 +399,7 @@ enum {
     CORE_SETTINGS_DEFS         = 43,
     CORE_SETTINGS_DUMP         = 44,
     CORE_SETTINGS_PLUGINS      = 45,
+    CORE_REGISTER_INPUT_CH     = 46,
 };
 
 #ifdef __cplusplus
@@ -454,11 +498,12 @@ func buildPluginSDK(name string) *sdk.PluginSDK {
 			callVoid(2, string(stage), "", "", 0, 0)
 		},
 		func(name string) error { return callVoid(4, name, "", "", 0, 0) },
-		func(name string, caps int, desc string, handler sdk.ToolHandler) error {
+		func(name string, caps int, desc string, def sdk.ChannelDef, handler sdk.ToolHandler) error {
 			handlerMu.Lock()
 			outputHandlers[name] = handler
 			handlerMu.Unlock()
-			return callVoid(3, name, desc, "", caps, 0)
+			defJSON, _ := json.Marshal(def)
+			return callVoid(3, name, desc, string(defJSON), caps, 0)
 		},
 	)
 	base.SetIOInjector(dispatchIO{})
@@ -468,6 +513,12 @@ func buildPluginSDK(name string) *sdk.PluginSDK {
 	base.SetLLMAPI(dispatchLLM{})
 	base.SetSocialAPI(dispatchSocial{})
 	base.SetTextMemoryAPI(dispatchTextMemory{})
+	base.SetInputChannelRegistrar(
+		func(name string, def sdk.ChannelDef) error {
+			defJSON, _ := json.Marshal(def)
+			return callVoid(46, name, string(defJSON), "", 0, 0)
+		},
+	)
 	return base
 }
 

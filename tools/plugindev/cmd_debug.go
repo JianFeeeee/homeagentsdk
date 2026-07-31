@@ -153,7 +153,7 @@ func debugLua(dir, sdkPath, luaPath string) {
 }
 
 func debugGo(dir string, replaces []string) {
-	debug, err := yaegi.NewGoPluginDebug(dir, replaces)
+	debug, err := yaegi.NewYaegiDebugger(dir, replaces)
 	if err != nil {
 		fmt.Printf("error: %v\n", err)
 		os.Exit(1)
@@ -161,33 +161,14 @@ func debugGo(dir string, replaces []string) {
 
 	fmt.Printf("[debug] Plugin dir: %s\n", dir)
 
-	// Clean any stale debug harness
-	debug.Cleanup()
+	if err := debug.LoadPlugin(); err != nil {
+		fmt.Printf("[debug] load plugin: %v\n", err)
+		os.Exit(1)
+	}
 
-	// Try Yaegi interpreter first (fast, no compilation)
-	if err := debug.DebugWithYaegi(); err != nil {
-		// Fall back to go run with generated debug harness
-		// Apply third-party replace directives before go run
-		patcher := NewGoModPatcher(dir, replaces)
-		restore, pErr := patcher.Apply()
-		if pErr != nil {
-			fmt.Printf("[debug] warn: apply replaces: %v\n", pErr)
-		}
-
-		if _, genErr := debug.GenerateDebugMain(); genErr != nil {
-			restore()
-			fmt.Printf("[debug] generate fallback: %v\n", genErr)
-			os.Exit(1)
-		}
-
-		runErr := debug.DebugWithGoRun()
-		debug.Cleanup()
-		restore()
-
-		if runErr != nil {
-			fmt.Printf("[debug] go run failed: %v\n", runErr)
-			os.Exit(1)
-		}
+	if err := debug.StartREPL(); err != nil {
+		fmt.Printf("[debug] repl error: %v\n", err)
+		os.Exit(1)
 	}
 }
 
