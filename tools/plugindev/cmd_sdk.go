@@ -158,34 +158,6 @@ func cmdSDKInstall(version string) {
 	url := fmt.Sprintf(sdkDownloadURL, version, version)
 	fmt.Printf("Downloading SDK %s from Release archive...\n", version)
 
-	tmpFile, err := os.CreateTemp("", "homeagent-sdk-*.tar.gz")
-	if err != nil {
-		fmt.Printf("error: create temp file: %v\n", err)
-		os.Exit(1)
-	}
-	tmpPath := tmpFile.Name()
-	defer os.Remove(tmpPath)
-
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Get(url)
-	if err != nil {
-		fmt.Printf("error: download SDK %s: %v\n", version, err)
-		os.Exit(1)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		fmt.Printf("error: download SDK %s: HTTP %d\n", version, resp.StatusCode)
-		os.Exit(1)
-	}
-
-	if _, err := io.Copy(tmpFile, resp.Body); err != nil {
-		fmt.Printf("error: save SDK archive: %v\n", err)
-		os.Exit(1)
-	}
-	tmpFile.Close()
-
-	// Extract to temp dir, then rename to dest
 	tmpDir, err := os.MkdirTemp("", "homeagent-sdk-extract-*")
 	if err != nil {
 		fmt.Printf("error: create temp dir: %v\n", err)
@@ -193,61 +165,13 @@ func cmdSDKInstall(version string) {
 	}
 	defer os.RemoveAll(tmpDir)
 
-	f, err := openFile(tmpPath)
-	if err != nil {
-		fmt.Printf("error: open archive: %v\n", err)
-		os.Exit(1)
-	}
-	gzr, err := gzip.NewReader(f)
-	if err != nil {
-		f.Close()
-		fmt.Printf("error: read archive: %v\n", err)
-		os.Exit(1)
-	}
-	defer gzr.Close()
-	defer f.Close()
-
-	tr := tar.NewReader(gzr)
-	for {
-		header, err := tr.Next()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			fmt.Printf("error: extract archive: %v\n", err)
+	if err := installFromArchive(url, tmpDir); err != nil {
+		fmt.Printf("warn: archive download failed (%v), falling back to git clone...\n", err)
+		if err := installFromGit(version, tmpDir); err != nil {
+			fmt.Printf("error: install SDK %s: %v\n", version, err)
 			os.Exit(1)
 		}
-
-		// Strip top-level directory from archive path
-		parts := strings.SplitN(header.Name, "/", 2)
-		if len(parts) < 2 {
-			continue
-		}
-		relPath := parts[1]
-		if relPath == "" {
-			continue
-		}
-		target := filepath.Join(tmpDir, relPath)
-
-		switch header.Typeflag {
-		case tar.TypeDir:
-			os.MkdirAll(target, os.FileMode(header.Mode))
-		case tar.TypeReg:
-			os.MkdirAll(filepath.Dir(target), 0755)
-			f, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY, os.FileMode(header.Mode))
-			if err != nil {
-				fmt.Printf("error: create file %s: %v\n", target, err)
-				os.Exit(1)
-			}
-			if _, err := io.Copy(f, tr); err != nil {
-				f.Close()
-				fmt.Printf("error: write file %s: %v\n", target, err)
-				os.Exit(1)
-			}
-			f.Close()
-		}
 	}
-	gzr.Close()
 
 	if err := os.Rename(tmpDir, dest); err != nil {
 		// Cross-filesystem rename fallback
@@ -272,6 +196,94 @@ func openFile(path string) (*os.File, error) {
 		return nil, err
 	}
 	return f, nil
+}
+
+// installFromArchive downloads the SDK release archive and extracts it to tmpDir.
+func installFromArchive(url, tmpDir string) error {
+	tmpFile, err := os.CreateTemp("", "homeagent-sdk-*.tar.gz")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmpFile.Name()
+	defer os.Remove(tmpPath)
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Get(url)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("download SDK %s: HTTP %d", url, resp.StatusCode)
+	}
+
+	if _, err := io.Copy(tmpFile, resp.Body); err != nil {
+		return err
+	}
+	tmpFile.Close()
+
+	f, err := openFile(tmpPath)
+	if err != nil {
+		return err
+	}
+	gzr, err := gzip.NewReader(f)
+	if err != nil {
+		f.Close()
+		return err
+	}
+	defer gzr.Close()
+	defer f.Close()
+
+	tr := tar.NewReader(gzr)
+	for {
+		header, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return err
+		}
+
+		// Strip top-level directory from archive path
+		parts := strings.SplitN(header.Name, "/", 2)
+		if len(parts) < 2 {
+			continue
+		}
+		relPath := parts[1]
+		if relPath == "" {
+			continue
+		}
+		target := filepath.Join(tmpDir, relPath)
+
+		switch header.Typeflag {
+		case tar.TypeDir:
+			os.MkdirAll(target, os.FileMode(header.Mode))
+		case tar.TypeReg:
+			os.MkdirAll(filepath.Dir(target), 0755)
+			f, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY, os.FileMode(header.Mode))
+			if err != nil {
+				return err
+			}
+			if _, err := io.Copy(f, tr); err != nil {
+				f.Close()
+				return err
+			}
+			f.Close()
+		}
+	}
+	return nil
+}
+
+// installFromGit clones the SDK repo at the given tag/branch into tmpDir.
+func installFromGit(version, tmpDir string) error {
+	cmd := exec.Command("git", "clone", "--depth", "1", "--branch", version, sdkRepoURL, tmpDir)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("git clone: %v", err)
+	}
+	return os.RemoveAll(filepath.Join(tmpDir, ".git"))
 }
 
 // cmdSDKUse switches the active SDK version.
