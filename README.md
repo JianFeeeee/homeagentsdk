@@ -251,6 +251,7 @@ return plugin
 
 - `Start(sdk *PluginSDK) error` — 插件启动，接收 SDK 实例
 - `Stop() error` — 插件停止，释放资源
+- `sdk.RegisterStopHandler(fn func())` — 注册停止清理回调。内核（内置插件）或 z_bridge（外部插件）会在调用插件 `Stop()` **之前**统一执行已注册的 handler（后注册先执行，执行后清空、幂等）。适合做持久化落盘、取消后台任务等清理：此时插件内存状态仍然新鲜，避免在 `Stop()` 阶段以陈旧状态写回导致数据复活。
 
 ### 自动重启
 

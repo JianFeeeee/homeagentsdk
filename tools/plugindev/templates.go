@@ -37,6 +37,7 @@ func (p *Plugin) Name() string { return p.name }
 
 func (p *Plugin) Start(s *sdk.PluginSDK) error {
 	p.sdk = s
+	s.RegisterStopHandler(func() { fmt.Printf("[%s] stop handler running\n", p.name) })
 	s.Settings().RegisterDef(sdk.ConfigDef{
 		Key: "plugin.{{.Plg.Name}}.example", Default: "hello", Type: "string",
 		DisplayName: "示例配置", Description: "An example configuration key",
@@ -178,6 +179,7 @@ type bridgeState struct {
 	handlers map[string]sdk.ToolHandler
 	stages   map[string]sdk.StageHandler
 	settings map[string]interface{}
+	sdk      *sdk.PluginSDK
 }
 
 func newHandle(plg sdk.Plugin) unsafe.Pointer {
@@ -222,6 +224,7 @@ func StartPlugin(handle unsafe.Pointer) C.int {
 		func(name string, caps int, desc string, def sdk.ChannelDef, handler sdk.ToolHandler) error { return nil },
 	)
 	mockSDK.SetInputChannelRegistrar(func(name string, def sdk.ChannelDef) error { return nil })
+	bs.sdk = mockSDK
 	if err := bs.plugin.Start(mockSDK); err != nil { return 1 }
 	return 0
 }
@@ -230,6 +233,9 @@ func StartPlugin(handle unsafe.Pointer) C.int {
 func StopPlugin(handle unsafe.Pointer) C.int {
 	bs := getState(handle)
 	if bs == nil { return 1 }
+	if bs.sdk != nil {
+		bs.sdk.RunStopHandlers()
+	}
 	if err := bs.plugin.Stop(); err != nil { return 1 }
 	return 0
 }
@@ -429,6 +435,7 @@ import (
 var (
 	mu         sync.Mutex
 	currentPlg sdk.Plugin
+	currentSDK *sdk.PluginSDK
 	coreAPI    unsafe.Pointer
 
 	handlerMu   sync.RWMutex
@@ -634,6 +641,7 @@ func go_start_plugin(coreAPIptr unsafe.Pointer, coreVersion C.int, errorOut **C.
 	_ = coreVersion
 	if plg == nil { *errorOut = C.CString("not initialized"); return 1 }
 	sdk := buildPluginSDK(plg.Name())
+	mu.Lock(); currentSDK = sdk; mu.Unlock()
 	if err := plg.Start(sdk); err != nil { *errorOut = C.CString(err.Error()); return 1 }
 	return 0
 }
@@ -642,11 +650,16 @@ func go_start_plugin(coreAPIptr unsafe.Pointer, coreVersion C.int, errorOut **C.
 func go_stop_plugin(errorOut **C.char) C.int {
 	mu.Lock()
 	plg := currentPlg
+	sdk := currentSDK
 	currentPlg = nil
+	currentSDK = nil
 	coreAPIMu.Lock()
 	coreAPI = nil
 	coreAPIMu.Unlock()
 	mu.Unlock()
+	if sdk != nil {
+		sdk.RunStopHandlers()
+	}
 	if plg != nil {
 		if err := plg.Stop(); err != nil { *errorOut = C.CString(err.Error()); return 1 }
 	}

@@ -20,6 +20,12 @@ func (p *Plugin) Name() string { return p.name }
 func (p *Plugin) Start(s *sdk.PluginSDK) error {
 	p.sdk = s
 
+	s.RegisterStopHandler(func() {
+		fmt.Printf("[%s] stop handler running\n", p.name)
+	})
+	s.RegisterOnRemoveHandler(func() {
+		fmt.Printf("[%s] onRemove handler running\n", p.name)
+	})
 	s.Settings().RegisterDef(sdk.ConfigDef{
 		Key:         "plugin.{{.Plg.Name}}.example",
 		Default:     "hello",

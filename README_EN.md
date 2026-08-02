@@ -208,6 +208,7 @@ Supports both **Go** and **Lua** plugin languages.
 
 - `Start(sdk *PluginSDK) error` — Plugin startup, receives SDK instance
 - `Stop() error` — Plugin shutdown, release resources
+- `sdk.RegisterStopHandler(fn func())` — Register a shutdown cleanup callback. The kernel (for built-in plugins) or z_bridge (for external plugins) runs all registered handlers **before** calling the plugin's `Stop()` (LIFO order, cleared after running — idempotent). Use it for persistence and cancelling background work: plugin memory is still fresh at that point, avoiding stale-state write-backs that resurrect deleted data.
 
 ### Auto-Restart
 

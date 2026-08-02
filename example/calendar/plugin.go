@@ -185,14 +185,14 @@ func daysInLunarYear(year int) int {
 	}
 	y := lunarInfo[year-1900]
 	sum := 0
-	for i := 0x8000; i > 0; i >>= 1 {
+	for i := 0x8000; i > 0x8; i >>= 1 {
 		if y&i > 0 {
 			sum += 30
 		} else {
 			sum += 29
 		}
 	}
-	return sum
+	return sum + leapDays(year)
 }
 
 func leapMonth(year int) int {
@@ -236,11 +236,9 @@ func lunarToSolar(year, month, day int) (time.Time, bool) {
 		offset += daysInLunarYear(y)
 	}
 	lm := leapMonth(year)
+	_ = lm
 	for m := 1; m < month; m++ {
 		offset += monthDays(year, m)
-		if m == lm {
-			offset += leapDays(year)
-		}
 	}
 	offset += day - 1
 	solar := baseSolar.AddDate(0, 0, offset)
@@ -254,7 +252,7 @@ func nextLunarYearly(targetMonth, targetDay int, after time.Time) (time.Time, bo
 		if !ok {
 			continue
 		}
-		if t.After(after) || t.Equal(after) {
+		if t.After(after) {
 			return t, true
 		}
 	}
@@ -273,6 +271,12 @@ func (p *Plugin) Start(s *sdk.PluginSDK) error {
 	p.dataDir = filepath.Join(dataHome, ".homeagent", "calendar")
 	os.MkdirAll(p.dataDir, 0755)
 	p.loadEvents()
+
+	// 持久化交由 stop handler：内核会在调用 Stop() 之前执行，
+	// 避免 Stop() 阶段以陈旧内存写回导致已删除事件复活。
+	s.RegisterStopHandler(p.saveEvents)
+	// 删除清理：卸载插件时移除本地事件数据文件（删除专用回调，重载不触发）。
+	s.RegisterOnRemoveHandler(p.cleanupData)
 
 	tp := p.name + "_"
 
@@ -388,7 +392,6 @@ func (p *Plugin) Stop() error {
 	p.remindTicker.Stop()
 	close(p.stopCh)
 	p.wg.Wait()
-	p.saveEvents()
 	fmt.Printf("[%s] stopped\n", p.name)
 	return nil
 }
@@ -479,8 +482,17 @@ func (p *Plugin) checkReminders() {
 				pid = e.ParentID
 			}
 			next.ParentID = pid
-			newEvents = append(newEvents, *next)
-			changed = true
+			dup := false
+			for _, ev := range p.events {
+				if ev.ID != e.ID && ev.ParentID == pid && ev.StartTime == next.StartTime {
+					dup = true
+					break
+				}
+			}
+			if !dup {
+				newEvents = append(newEvents, *next)
+				changed = true
+			}
 		}
 	}
 	if len(newEvents) > 0 {
@@ -560,9 +572,7 @@ func (p *Plugin) cleanupPastEvents() {
 			keep = append(keep, e)
 			continue
 		}
-		if e.Repeat != "" && e.Repeat != RepeatNone {
-			keep = append(keep, e)
-		}
+		_ = e // 过时重复事件不再保留：next 已由 nextOccurrence 追加
 	}
 	p.events = keep
 }
@@ -571,6 +581,17 @@ func (p *Plugin) cleanupPastEvents() {
 
 func (p *Plugin) eventsFile() string {
 	return filepath.Join(p.dataDir, "events.json")
+}
+
+// cleanupData 删除插件时清理本地持久化数据文件。
+func (p *Plugin) cleanupData() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if err := os.Remove(p.eventsFile()); err != nil && !os.IsNotExist(err) {
+		fmt.Printf("[calendar] onRemove cleanup: %v\n", err)
+	} else {
+		fmt.Printf("[calendar] onRemove removed %s\n", p.eventsFile())
+	}
 }
 
 func (p *Plugin) loadEvents() {
