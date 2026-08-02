@@ -210,6 +210,20 @@ Supports both **Go** and **Lua** plugin languages.
 - `Stop() error` — Plugin shutdown, release resources
 - `sdk.RegisterStopHandler(fn func())` — Register a shutdown cleanup callback. The kernel (for built-in plugins) or z_bridge (for external plugins) runs all registered handlers **before** calling the plugin's `Stop()` (LIFO order, cleared after running — idempotent). Use it for persistence and cancelling background work: plugin memory is still fresh at that point, avoiding stale-state write-backs that resurrect deleted data.
 
+### Remove Cleanup (onRemove)
+
+`Stop` / `RegisterStopHandler` run whenever the plugin **stops** (including reload and disable); `RegisterOnRemoveHandler` runs **only once when the plugin is uninstalled (removed)** — never on reload or disable:
+
+- `sdk.RegisterOnRemoveHandler(fn func())` — Register a remove cleanup callback. The kernel runs it **after** the plugin's `Stop()` in the `RemovePlugin` flow (LIFO order, cleared after running — idempotent). Use it to delete persistent files the plugin created itself (data/cache/state files).
+- The kernel also cleans up on uninstall: tool registrations, the `disabled_plugins` record, the plugin's config definitions (`plugin.<name>.*`) and its config table (`config_<name>`) — the plugin's config section disappears completely after removal.
+- Examples: `example/calendar` (removes events.json), `example/memo` (removes memos.json), `example/rss` (removes the subscription data dir), `example/weather` (removes the cache dir); the `plugindev` template includes an onRemove demo.
+
+```go
+sdk.RegisterOnRemoveHandler(func() {
+    os.Remove(filepath.Join(dataDir, "events.json"))
+})
+```
+
 ### Auto-Restart
 
 ```go

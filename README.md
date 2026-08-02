@@ -253,6 +253,20 @@ return plugin
 - `Stop() error` — 插件停止，释放资源
 - `sdk.RegisterStopHandler(fn func())` — 注册停止清理回调。内核（内置插件）或 z_bridge（外部插件）会在调用插件 `Stop()` **之前**统一执行已注册的 handler（后注册先执行，执行后清空、幂等）。适合做持久化落盘、取消后台任务等清理：此时插件内存状态仍然新鲜，避免在 `Stop()` 阶段以陈旧状态写回导致数据复活。
 
+### 删除清理（onRemove）
+
+`Stop`/`RegisterStopHandler` 在插件**停止**（含重载、禁用）时执行；`RegisterOnRemoveHandler` 仅在插件被**卸载（删除）**时执行一次，重载/禁用不触发：
+
+- `sdk.RegisterOnRemoveHandler(fn func())` — 注册删除清理回调。内核在 `RemovePlugin` 流程中、插件 `Stop()` **之后**执行（后注册先执行，执行后清空、幂等）。用于删除插件自身创建的持久化文件（数据/缓存/状态文件）。
+- 内核卸载时一并清理：工具注册、`disabled_plugins` 记录、插件配置项定义（`plugin.<name>.*`）与插件配置表（`config_<name>`），卸载后插件配置区完全消失。
+- 示例：`example/calendar`（删 events.json）、`example/memo`（删 memos.json）、`example/rss`（删订阅数据目录）、`example/weather`（删缓存目录）；`plugindev` 模板含 onRemove 演示。
+
+```go
+sdk.RegisterOnRemoveHandler(func() {
+    os.Remove(filepath.Join(dataDir, "events.json"))
+})
+```
+
 ### 自动重启
 
 ```go
