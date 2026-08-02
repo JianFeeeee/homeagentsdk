@@ -1,9 +1,9 @@
-﻿{
+{
   "name": "memo",
   "name_zh": "备忘录",
-  "name_en": "Memo/Notes",
+  "name_en": "Memo",
   "version": "1.0.0",
-  "description": "待办事项与备忘录管理插件。支持创建、完成、列表查看。通过阶段钩子在每次对话前注入待办提醒。",
+  "description": "待办与备忘录插件。待办（todo_add/todo_complete/todo_list）会主动提醒；备忘录（memo_create/memo_list/memo_delete）纯记事不提醒。",
   "author": "HomeAgent",
   "entry": "plugin.so",
   "tags": ["memo", "todo", "notes"],

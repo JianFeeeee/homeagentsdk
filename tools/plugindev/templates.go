@@ -365,6 +365,7 @@ enum {
     CORE_INJECT_TEXT          = 5,
     CORE_INJECT_INTERRUPT_TEXT = 6,
     CORE_INJECT_TEXT_NO_MEMORY = 7,
+    CORE_INJECT_INPUT_SYNC    = 47,
     CORE_SET_AUTO_RESTART     = 8,
     CORE_MEMORY_RECALL        = 9,
     CORE_MEMORY_COMMIT        = 10,
@@ -533,6 +534,7 @@ type dispatchIO struct{}
 func (dispatchIO) InjectInterruptText(s, c, t string) { callVoid(6, s, c, t, 0, 0) }
 func (dispatchIO) InjectText(s, c, t string)           { callVoid(5, s, c, t, 0, 0) }
 func (dispatchIO) InjectTextNoMemory(s, c, t string)   { callVoid(7, s, c, t, 0, 0) }
+func (dispatchIO) InjectInputSync(s, c, t string) string { r, _ := callString(47, s, c, t, 0, 0); return r }
 
 type dispatchMemory struct{}
 func (dispatchMemory) Recall(q []string, d int) ([]sdk.Entity, []sdk.Relation, error) {
