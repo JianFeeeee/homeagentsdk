@@ -46,6 +46,9 @@ func (p *Plugin) Start(s *sdk.PluginSDK) error {
 	p.filePath = filepath.Join(fmt.Sprint(dataDirVal), "memos.json")
 	p.load()
 
+	// 卸载（删除）时清理备忘数据文件；重载不触发
+	s.RegisterOnRemoveHandler(p.cleanupData)
+
 	s.RegisterTool(p.tp+"create", sdk.ToolDef{
 		Name:        p.tp + "create",
 		Description: "创建一条备忘条目。备忘内容应包含具体事项的完整描述。",
@@ -271,4 +274,11 @@ func errorResult(msg string) map[string]interface{} {
 
 func NewPluginFactory(name string, config map[string]interface{}) (sdk.Plugin, error) {
 	return &Plugin{name: name}, nil
+}
+
+// cleanupData 卸载时清理备忘数据文件
+func (p *Plugin) cleanupData() {
+	if p.filePath != "" {
+		os.Remove(p.filePath)
+	}
 }

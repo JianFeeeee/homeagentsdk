@@ -19,6 +19,7 @@ type Plugin struct {
 	sdk        *sdk.PluginSDK
 	client     *http.Client
 	defaultLoc string
+	dataDir    string
 }
 
 func NewPluginFactory(name string, config map[string]interface{}) (sdk.Plugin, error) {
@@ -48,7 +49,11 @@ func (p *Plugin) Start(s *sdk.PluginSDK) error {
 	if dataHome == "" {
 		dataHome = "/tmp"
 	}
-	os.MkdirAll(filepath.Join(dataHome, ".homeagent", "weather"), 0755)
+	p.dataDir = filepath.Join(dataHome, ".homeagent", "weather")
+	os.MkdirAll(p.dataDir, 0755)
+
+	// 卸载（删除）时清理天气缓存目录；重载不触发
+	s.RegisterOnRemoveHandler(p.cleanupData)
 
 	tp := p.name + "_"
 	s.RegisterTool(tp+"current", sdk.ToolDef{
@@ -422,4 +427,11 @@ func (p *Plugin) handleSetLocation(args map[string]interface{}) (interface{}, er
 	p.sdk.Settings().Set("default_location", loc)
 	p.defaultLoc = loc
 	return map[string]interface{}{"content": fmt.Sprintf("Default location set to: %s", loc)}, nil
+}
+
+// cleanupData 卸载时清理天气缓存目录
+func (p *Plugin) cleanupData() {
+	if p.dataDir != "" {
+		os.RemoveAll(p.dataDir)
+	}
 }

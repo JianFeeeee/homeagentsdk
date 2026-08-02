@@ -113,6 +113,9 @@ func (p *Plugin) Start(s *sdk.PluginSDK) error {
 	os.MkdirAll(p.dataDir, 0755)
 	p.loadData()
 
+	// 卸载（删除）时清理订阅数据目录；重载不触发
+	s.RegisterOnRemoveHandler(p.cleanupData)
+
 	s.Settings().RegisterDef(sdk.ConfigDef{
 		Key: "poll_interval", Default: "30", Type: "string",
 		DisplayName: "Poll Interval", Description: "Default polling interval in minutes (default: 30)",
@@ -435,6 +438,13 @@ func (p *Plugin) saveData() {
 	}
 	b, _ := json.MarshalIndent(data, "", "  ")
 	os.WriteFile(p.dataFile(), b, 0644)
+}
+
+// cleanupData 卸载时清理订阅数据目录（feeds.json 等）
+func (p *Plugin) cleanupData() {
+	if p.dataDir != "" {
+		os.RemoveAll(p.dataDir)
+	}
 }
 
 
