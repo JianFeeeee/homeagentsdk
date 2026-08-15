@@ -4,15 +4,19 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
 
 	"gitcode.com/JianFeeeee/homeagent-sdk/sdk"
 )
 
 type Plugin struct {
-	name string
-	sdk  *sdk.PluginSDK
+	name       string
+	sdk        *sdk.PluginSDK
+	scriptPath string
+	venvPython string
 }
 
 func (p *Plugin) Name() string { return p.name }
@@ -20,6 +24,30 @@ func (p *Plugin) Name() string { return p.name }
 func (p *Plugin) Start(s *sdk.PluginSDK) error {
 	s.SetAutoRestart(true)
 	p.sdk = s
+
+	s.Settings().RegisterDef(sdk.ConfigDef{
+		Key: "script_path", Default: "", Type: "string",
+		DisplayName: "编辑脚本路径",
+		Description: "edit_doc.py 的绝对路径；留空时使用插件可执行文件同目录下的 edit_doc.py",
+		Category:    p.name,
+	})
+	s.Settings().RegisterDef(sdk.ConfigDef{
+		Key: "venv_python", Default: "", Type: "string",
+		DisplayName: "venv Python 解释器",
+		Description: "执行 edit_doc.py 使用的 Python 解释器（建议用 venv 内的 python）；必须配置，留空将报错",
+		Category:    p.name,
+	})
+
+	if v, err := s.Settings().Get("script_path"); err == nil {
+		if str, ok := v.(string); ok {
+			p.scriptPath = str
+		}
+	}
+	if v, err := s.Settings().Get("venv_python"); err == nil {
+		if str, ok := v.(string); ok {
+			p.venvPython = str
+		}
+	}
 	s.RegisterTool("edit_document", sdk.ToolDef{
 		Name:        "edit_document",
 		Description: "编辑 Office 文档内容。支持替换文本、修改单元格等操作。编辑后原文件被覆盖。操作前建议先用 read_document 查看内容。支持 .docx / .xlsx / .pptx。",
@@ -80,19 +108,24 @@ func (p *Plugin) handleEditDocument(args map[string]interface{}) (interface{}, e
 	}
 	pyArgsJSON, _ := json.Marshal(pyArgs)
 
-	scriptPath := "/home/newqqagent/plugins/editdoc/edit_doc.py"
+	scriptPath := p.scriptPath
+	if scriptPath == "" {
+		scriptPath = filepath.Join(filepath.Dir(os.Args[0]), "edit_doc.py")
+		log.Printf("[%s] script_path 未配置，使用默认脚本路径: %s", p.name, scriptPath)
+	}
 	if _, err := os.Stat(scriptPath); os.IsNotExist(err) {
-		return nil, fmt.Errorf("edit_doc.py not found at %s", scriptPath)
+		return nil, fmt.Errorf("edit_doc.py not found at %s（请在插件配置 script_path 中指定脚本路径）", scriptPath)
 	}
 
-	venvPython := "/home/program/qq-workspace/self-workplace/.venv/bin/python3"
-	pythonBin := "python3"
-	if _, err := os.Stat(venvPython); err == nil {
-		pythonBin = venvPython
+	if p.venvPython == "" {
+		return nil, fmt.Errorf("venv_python 未配置，无法执行脚本；请在插件配置中设置 venv_python（venv 内 python 的绝对路径）")
+	}
+	if _, err := os.Stat(p.venvPython); err != nil {
+		return nil, fmt.Errorf("venv python 不存在: %s（请检查 venv_python 配置）", p.venvPython)
 	}
 
 	var out bytes.Buffer
-	cmd := exec.Command(pythonBin, scriptPath, file, operation, string(pyArgsJSON))
+	cmd := exec.Command(p.venvPython, scriptPath, file, operation, string(pyArgsJSON))
 	cmd.Stdout = &out
 	if err := cmd.Run(); err != nil {
 		return nil, fmt.Errorf("edit document: %w", err)

@@ -8,13 +8,15 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"gitcode.com/JianFeeeee/homeagent-sdk/sdk"
 )
 
 type Plugin struct {
-	name string
-	sdk  *sdk.PluginSDK
+	name  string
+	sdk   *sdk.PluginSDK
+	proxy string
 }
 
 func (p *Plugin) Name() string { return p.name }
@@ -30,6 +32,17 @@ func (p *Plugin) Start(s *sdk.PluginSDK) error {
 		Description: "B站视频下载后的保存目录",
 		Category: p.name,
 	})
+	s.Settings().RegisterDef(sdk.ConfigDef{
+		Key: "proxy", Default: "",
+		Type: "string", DisplayName: "HTTP 代理",
+		Description: "yt-dlp 下载使用的 HTTP 代理地址（如 http://127.0.0.1:7890），留空则不设置",
+		Category: p.name,
+	})
+	if v, _ := s.Settings().Get("proxy"); v != nil {
+		if str, ok := v.(string); ok {
+			p.proxy = str
+		}
+	}
 
 	s.RegisterTool(tp+"video", sdk.ToolDef{
 		Name:        tp + "video",
@@ -101,7 +114,7 @@ func (p *Plugin) handleBiliVideo(args map[string]interface{}) (interface{}, erro
 	cmd := exec.Command("yt-dlp", ytdlpArgs...)
 	cmd.Stdout = &out
 	cmd.Stderr = &out
-	cmd.Env = append(os.Environ(), "HTTP_PROXY=http://127.0.0.1:7890", "HTTPS_PROXY=http://127.0.0.1:7890")
+	cmd.Env = proxyEnv(p.proxy)
 	if err := cmd.Run(); err != nil {
 		return nil, fmt.Errorf("yt-dlp info: %w\n%s", err, strings.TrimSpace(out.String()))
 	}
@@ -171,12 +184,17 @@ func (p *Plugin) handleBiliVideo(args map[string]interface{}) (interface{}, erro
 		return map[string]interface{}{"content": strings.Join(lines, "\n")}, nil
 	}
 
+	taskDir := filepath.Join(outputDir, fmt.Sprintf("bili_%d", time.Now().UnixNano()))
+	if err := os.MkdirAll(taskDir, 0755); err != nil {
+		return nil, fmt.Errorf("mkdir task dir: %w", err)
+	}
+
 	dlArgs := []string{
 		"--no-warnings",
 		"--socket-timeout", "30",
 		"--retries", "3",
 		"--fragment-retries", "3",
-		"-o", filepath.Join(outputDir, "%(title)s.%(ext)s"),
+		"-o", filepath.Join(taskDir, "%(title)s.%(ext)s"),
 		"--no-overwrites",
 	}
 	if format != "" {
@@ -184,7 +202,7 @@ func (p *Plugin) handleBiliVideo(args map[string]interface{}) (interface{}, erro
 	}
 	dlArgs = append(dlArgs, url)
 	cmd2 := exec.Command("yt-dlp", dlArgs...)
-	cmd2.Env = append(os.Environ(), "HTTP_PROXY=http://127.0.0.1:7890", "HTTPS_PROXY=http://127.0.0.1:7890")
+	cmd2.Env = proxyEnv(p.proxy)
 	var dlOut bytes.Buffer
 	cmd2.Stdout = &dlOut
 	cmd2.Stderr = &dlOut
@@ -192,9 +210,18 @@ func (p *Plugin) handleBiliVideo(args map[string]interface{}) (interface{}, erro
 		return nil, fmt.Errorf("yt-dlp download: %w\n%s", err, strings.TrimSpace(dlOut.String()))
 	}
 
-	entries, _ := os.ReadDir(outputDir)
-	var newest string
-	var newestTime int64
+	parts, _ := filepath.Glob(filepath.Join(taskDir, "*.part"))
+	for _, f := range parts {
+		os.Remove(f)
+	}
+	residuals, _ := filepath.Glob(filepath.Join(taskDir, "*.ytdl"))
+	for _, f := range residuals {
+		os.Remove(f)
+	}
+
+	entries, _ := os.ReadDir(taskDir)
+	var mainFile string
+	var mainSize int64
 	for _, e := range entries {
 		if e.IsDir() {
 			continue
@@ -203,28 +230,30 @@ func (p *Plugin) handleBiliVideo(args map[string]interface{}) (interface{}, erro
 		if fi == nil {
 			continue
 		}
-		t := fi.ModTime().Unix()
-		if t > newestTime {
-			newestTime = t
-			newest = e.Name()
+		if fi.Size() > mainSize {
+			mainSize = fi.Size()
+			mainFile = e.Name()
 		}
 	}
-	if newest == "" {
+	if mainFile == "" {
 		return map[string]interface{}{
 			"content": "下载完成，但未找到视频文件",
 		}, nil
 	}
-	dlPath := filepath.Join(outputDir, newest)
-	fi, _ := os.Stat(dlPath)
-	var fileSize int64
-	if fi != nil {
-		fileSize = fi.Size()
-	}
+	dlPath := filepath.Join(taskDir, mainFile)
 	return map[string]interface{}{
-		"content":  fmt.Sprintf("下载完成: %s (%.1f MB)\n路径: %s", newest, float64(fileSize)/1048576, dlPath),
+		"content":  fmt.Sprintf("下载完成: %s (%.1f MB)\n路径: %s", mainFile, float64(mainSize)/1048576, dlPath),
 		"file":     dlPath,
-		"filename": newest,
+		"filename": mainFile,
 	}, nil
+}
+
+func proxyEnv(proxy string) []string {
+	env := os.Environ()
+	if proxy != "" {
+		env = append(env, "HTTP_PROXY="+proxy, "HTTPS_PROXY="+proxy)
+	}
+	return env
 }
 
 func contains(slice []string, s string) bool {

@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
@@ -32,7 +33,7 @@ type ForwardRule struct {
 }
 
 func rconSend(host string, port int, password, cmd string) error {
-	addr := fmt.Sprintf("%s:%d", host, port)
+	addr := net.JoinHostPort(host, strconv.Itoa(port))
 	conn, err := net.DialTimeout("tcp", addr, 5*time.Second)
 	if err != nil {
 		return fmt.Errorf("rcon dial: %w", err)
@@ -66,7 +67,7 @@ func rconPacket(id, typ int32, body string) []byte {
 	b = append(b, 0) // null terminator
 	b = append(b, 0) // padding
 	length := 4 + 4 + len(b)
-	pkt := make([]byte, 4+len(b))
+	pkt := make([]byte, 12+len(b))
 	binary.LittleEndian.PutUint32(pkt, uint32(length))
 	binary.LittleEndian.PutUint32(pkt[4:], uint32(id))
 	binary.LittleEndian.PutUint32(pkt[8:], uint32(typ))
@@ -90,7 +91,8 @@ type Plugin struct {
 	napcatURL      string
 	remoteDir      string
 	filesDir       string
-	adminID        int64
+	webhookToken   string
+	adminIDs       []int64
 	botID          int64
 	botNickname    string
 	dmPolicy       string
@@ -119,7 +121,7 @@ func (p *Plugin) Start(s *sdk.PluginSDK) error {
 
 	s.Settings().RegisterDef(sdk.ConfigDef{Key: "listen", Default: "0.0.0.0:25580", Type: "string", DisplayName: "监听地址", Description: "Webhook HTTP 监听地址", Category: "qq"})
 	s.Settings().RegisterDef(sdk.ConfigDef{Key: "napcat_url", Default: "http://127.0.0.1:3000", Type: "string", DisplayName: "NapCat 地址", Description: "NapCat HTTP API 基础 URL", Category: "qq"})
-	s.Settings().RegisterDef(sdk.ConfigDef{Key: "admin", Default: "", Type: "string", DisplayName: "管理员 QQ", Description: "管理员 QQ 号，收到其消息时标记【重要！老大消息】", Category: "qq"})
+	s.Settings().RegisterDef(sdk.ConfigDef{Key: "admin", Default: "", Type: "string", DisplayName: "管理员 QQ", Description: "管理员 QQ 号列表，逗号分隔。收到其消息时标记【重要！老大消息】", Category: "qq"})
 	s.Settings().RegisterDef(sdk.ConfigDef{Key: "dm_policy", Default: "open", Type: "string", DisplayName: "私聊策略", Description: "open / allowlist / disabled", Category: "qq", Options: []string{"open", "allowlist", "disabled"}})
 	s.Settings().RegisterDef(sdk.ConfigDef{Key: "allow_from", Default: "", Type: "string", DisplayName: "私聊白名单", Description: "允许私聊机器人的 QQ 号列表，逗号分隔", Category: "qq"})
 	s.Settings().RegisterDef(sdk.ConfigDef{Key: "group_policy", Default: "open", Type: "string", DisplayName: "群聊策略", Description: "open / allowlist / disabled", Category: "qq", Options: []string{"open", "allowlist", "disabled"}})
@@ -127,13 +129,15 @@ func (p *Plugin) Start(s *sdk.PluginSDK) error {
 	s.Settings().RegisterDef(sdk.ConfigDef{Key: "forward_rules", Default: "[]", Type: "string", DisplayName: "转发规则", Description: "JSON 数组，每项 {group_id,host,port,password,template}。匹配的群消息通过 RCON 转发到 Minecraft。template 支持 {nickname} {message} 占位", Category: "qq"})
 	s.Settings().RegisterDef(sdk.ConfigDef{Key: "files_dir", Default: "/home/newqqagent/agentfs/merged/qq_files", Type: "string", DisplayName: "文件存储目录", Description: "从QQ接收的文件保存目录（CQ file/image 自动下载到此目录）", Category: "qq"})
 	s.Settings().RegisterDef(sdk.ConfigDef{Key: "remote_dir", Default: "/home/program/qq-workspace/remote", Type: "string", DisplayName: "NapCat容器共享目录", Description: "与NapCat容器共享的文件目录，主机路径。发文件时文件会复制到此目录，NapCat内部映射为/app/files/", Category: "qq"})
+	s.Settings().RegisterDef(sdk.ConfigDef{Key: "webhook_token", Default: "", Type: "string", DisplayName: "Webhook 令牌", Description: "NapCat 上报请求头 X-Webhook-Token 校验值，留空则不校验", Category: "qq"})
 	s.Settings().RegisterDef(sdk.ConfigDef{Key: "agentfs_dir", Default: "/home/newqqagent/agentfs/merged", Type: "string", DisplayName: "AgentFS目录", Description: "文件读写的工作目录，read_document/video_download 等工具的默认工作目录", Category: "qq"})
 
 	settings := s.Settings()
 
 	p.listenAddr = getSetting[string](settings, "listen", "0.0.0.0:25580")
+	p.webhookToken = getSetting[string](settings, "webhook_token", "")
 	p.napcatURL = strings.TrimRight(getSetting[string](settings, "napcat_url", "http://127.0.0.1:3000"), "/")
-	p.adminID = getSetting[int64](settings, "admin", 0)
+	p.adminIDs = parseIDList(getSetting[string](settings, "admin", ""))
 	p.dmPolicy = normalizePolicy(getSetting[string](settings, "dm_policy", "open"))
 	p.groupPolicy = normalizePolicy(getSetting[string](settings, "group_policy", "open"))
 	p.allowFrom = parseIDSet(getSetting[string](settings, "allow_from", ""))
@@ -279,7 +283,7 @@ type 枚举: text（文字）/ voice（语音转文字后发送）/ image（图�
 		NoMemory: false,
 		Parameters: map[string]interface{}{
 			"type": "object", "properties": map[string]interface{}{
-				"user_id": map[string]interface{}{"type": "integer", "description": "QQ号（与group_id二选一）"},
+				"user_id":  map[string]interface{}{"type": "integer", "description": "QQ号（与group_id二选一）"},
 				"group_id": map[string]interface{}{"type": "integer", "description": "群号（与user_id二选一）"},
 			},
 		},
@@ -312,19 +316,19 @@ type 枚举: text（文字）/ voice（语音转文字后发送）/ image（图�
 		Name: tp + "group_manage", Description: "QQ群综合管理。通过command参数执行各种操作：leave退群, kick踢人, ban禁言, unban解禁, rename改名, mute-all全员禁言, set-card设名片, set-admin设管理, set-title设头衔, member-list成员列表, group-info群详情, member-info成员详情, at-all-remain@全体剩余, msg-history消息历史, recall撤回, pin-msg精华, list-files文件列表, pending-requests待处理请求, folder-create创建文件夹。注意：leave/kick/ban/unban/mute-all/set-admin等破坏性操作必须先请示管理员确认后再执行。",
 		Parameters: map[string]interface{}{
 			"type": "object", "properties": map[string]interface{}{
-				"command":  map[string]interface{}{"type": "string", "description": "操作命令"},
-				"group_id": map[string]interface{}{"type": "integer", "description": "群号"},
-				"user_id":  map[string]interface{}{"type": "integer", "description": "QQ号（踢人/禁言/设名片等需要）"},
+				"command":    map[string]interface{}{"type": "string", "description": "操作命令"},
+				"group_id":   map[string]interface{}{"type": "integer", "description": "群号"},
+				"user_id":    map[string]interface{}{"type": "integer", "description": "QQ号（踢人/禁言/设名片等需要）"},
 				"message_id": map[string]interface{}{"type": "integer", "description": "消息ID（撤回/精华）"},
-				"name":     map[string]interface{}{"type": "string", "description": "群名称（rename）或文件夹名（folder-create）"},
-				"card":     map[string]interface{}{"type": "string", "description": "群名片（set-card）"},
-				"title":    map[string]interface{}{"type": "string", "description": "群头衔（set-title）"},
-				"enable":   map[string]interface{}{"type": "boolean", "description": "启用/禁用（set-admin/mute-all）"},
-				"minutes":  map[string]interface{}{"type": "integer", "description": "禁言分钟数（ban），0=解禁"},
-				"count":    map[string]interface{}{"type": "integer", "description": "消息条数（msg-history），默认10"},
-				"folder_id": map[string]interface{}{"type": "string", "description": "文件夹ID（list-files）"},
+				"name":       map[string]interface{}{"type": "string", "description": "群名称（rename）或文件夹名（folder-create）"},
+				"card":       map[string]interface{}{"type": "string", "description": "群名片（set-card）"},
+				"title":      map[string]interface{}{"type": "string", "description": "群头衔（set-title）"},
+				"enable":     map[string]interface{}{"type": "boolean", "description": "启用/禁用（set-admin/mute-all）"},
+				"minutes":    map[string]interface{}{"type": "integer", "description": "禁言分钟数（ban），0=解禁"},
+				"count":      map[string]interface{}{"type": "integer", "description": "消息条数（msg-history），默认10"},
+				"folder_id":  map[string]interface{}{"type": "string", "description": "文件夹ID（list-files）"},
 				"reject_add": map[string]interface{}{"type": "boolean", "description": "踢出时拒绝加群（kick）"},
-				"confirm": map[string]interface{}{"type": "boolean", "description": "高风险操作确认标记。执行 leave/kick/ban/unban/rename/mute-all/set-card/set-admin/set-title/recall/pin-msg/folder-create 时必须传 true"},
+				"confirm":    map[string]interface{}{"type": "boolean", "description": "高风险操作确认标记。执行 leave/kick/ban/unban/rename/mute-all/set-card/set-admin/set-title/recall/pin-msg/folder-create 时必须传 true"},
 			},
 		},
 		NoMemory: true,
@@ -334,12 +338,12 @@ type 枚举: text（文字）/ voice（语音转文字后发送）/ image（图�
 		Name: tp + "friend_action", Description: "QQ好友管理：delete删除好友, block拉黑（删好友+从所有群踢出+拒绝加群）, approve-friend同意好友请求, reject-friend拒绝好友请求, list-friends列出好友。注意：涉及删除/拉黑的操作必须请示管理员确认后再执行，未经授权不可操作。",
 		Parameters: map[string]interface{}{
 			"type": "object", "properties": map[string]interface{}{
-				"command": map[string]interface{}{"type": "string", "description": "操作: delete|block|approve-friend|reject-friend|list-friends"},
-				"user_id": map[string]interface{}{"type": "integer", "description": "目标QQ号"},
-				"flag":    map[string]interface{}{"type": "string", "description": "好友请求flag（approve-friend/reject-friend需要）"},
-				"remark":  map[string]interface{}{"type": "string", "description": "好友备注（approve-friend可选）"},
+				"command":  map[string]interface{}{"type": "string", "description": "操作: delete|block|approve-friend|reject-friend|list-friends"},
+				"user_id":  map[string]interface{}{"type": "integer", "description": "目标QQ号"},
+				"flag":     map[string]interface{}{"type": "string", "description": "好友请求flag（approve-friend/reject-friend需要）"},
+				"remark":   map[string]interface{}{"type": "string", "description": "好友备注（approve-friend可选）"},
 				"group_id": map[string]interface{}{"type": "integer", "description": "仅从指定群踢出（block配合）"},
-				"confirm": map[string]interface{}{"type": "boolean", "description": "高风险操作确认标记。执行 delete/block/approve-friend/reject-friend 时必须传 true"},
+				"confirm":  map[string]interface{}{"type": "boolean", "description": "高风险操作确认标记。执行 delete/block/approve-friend/reject-friend 时必须传 true"},
 			},
 		},
 		NoMemory: true,
@@ -352,12 +356,12 @@ type 枚举: text（文字）/ voice（语音转文字后发送）/ image（图�
 		Cleaner:  cleaner,
 		Parameters: map[string]interface{}{
 			"type": "object", "properties": map[string]interface{}{
-				"group_id": map[string]interface{}{"type": "integer", "description": "群号"},
-				"command":  map[string]interface{}{"type": "string", "description": "操作: list|search|download"},
+				"group_id":  map[string]interface{}{"type": "integer", "description": "群号"},
+				"command":   map[string]interface{}{"type": "string", "description": "操作: list|search|download"},
 				"folder_id": map[string]interface{}{"type": "string", "description": "文件夹ID（list指定文件夹）"},
-				"keyword":  map[string]interface{}{"type": "string", "description": "搜索关键词（search）"},
-				"file_id":  map[string]interface{}{"type": "string", "description": "文件ID（download）"},
-				"filename": map[string]interface{}{"type": "string", "description": "保存文件名（download可选）"},
+				"keyword":   map[string]interface{}{"type": "string", "description": "搜索关键词（search）"},
+				"file_id":   map[string]interface{}{"type": "string", "description": "文件ID（download）"},
+				"filename":  map[string]interface{}{"type": "string", "description": "保存文件名（download可选）"},
 			},
 		},
 	}, p.handleGetGroupFiles)
@@ -454,6 +458,15 @@ type 枚举: text（文字）/ voice（语音转文字后发送）/ image（图�
 }
 
 func (p *Plugin) Stop() error {
+	p.typingMu.Lock()
+	for _, st := range p.typingMap {
+		select {
+		case <-st.stopCh:
+		default:
+			close(st.stopCh)
+		}
+	}
+	p.typingMu.Unlock()
 	if p.srv != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -475,8 +488,8 @@ func (p *Plugin) fetchBotInfo() {
 		return
 	}
 	var info struct {
-		Status   string `json:"status"`
-		Data     *struct {
+		Status string `json:"status"`
+		Data   *struct {
 			UserID   int64  `json:"user_id"`
 			Nickname string `json:"nickname"`
 		} `json:"data"`
@@ -563,6 +576,29 @@ func parseIDSet(raw string) map[int64]struct{} {
 	return out
 }
 
+func parseIDList(raw string) []int64 {
+	var out []int64
+	for _, part := range strings.Split(raw, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		if n, err := strconv.ParseInt(part, 10, 64); err == nil && n > 0 {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+func (p *Plugin) isAdmin(userID int64) bool {
+	for _, id := range p.adminIDs {
+		if id == userID {
+			return true
+		}
+	}
+	return false
+}
+
 // isAtBot checks if the message contains an @-mention of the bot.
 func (p *Plugin) isAtBot(msg interface{}) bool {
 	segments, ok := msg.([]interface{})
@@ -616,7 +652,7 @@ func (p *Plugin) isGroupAllowed(groupID int64) bool {
 	case "allowlist":
 		_, ok := p.groupAllowFrom[groupID]
 		return ok
-		default:
+	default:
 		return true
 	}
 }
@@ -628,11 +664,6 @@ func (p *Plugin) beforeOwnToolcall(ctx *sdk.StageContext) error {
 		return nil
 	}
 	tc := &ctx.ToolCalls[0]
-	if tc.Name == p.name+"_send_file" || tc.Name == p.name+"_upload_group_file" {
-		if file, ok := tc.Arguments["file"].(string); ok {
-			tc.Arguments["file"] = p.sensitiveFilter(file)
-		}
-	}
 	if tc.Name == p.name+"_group_manage" {
 		cmd, _ := tc.Arguments["command"].(string)
 		if requiresConfirmGroupCommand(cmd) {
@@ -677,6 +708,10 @@ func requiresConfirmFriendCommand(cmd string) bool {
 func (p *Plugin) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "POST" {
 		http.Error(w, "", http.StatusMethodNotAllowed)
+		return
+	}
+	if p.webhookToken != "" && !hmac.Equal([]byte(r.Header.Get("X-Webhook-Token")), []byte(p.webhookToken)) {
+		w.WriteHeader(http.StatusUnauthorized)
 		return
 	}
 	body, _ := io.ReadAll(r.Body)
@@ -745,8 +780,20 @@ func (p *Plugin) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	} else {
 		interrupt = fmt.Sprintf("来自「%s」的私聊消息(message_id=%d)。使用%sget_message(message_id=%d)获取消息正文。使用%s回复对方", nickname, evt.MessageID, tp, evt.MessageID, outputTool)
 	}
-	if p.adminID > 0 && evt.UserID == p.adminID {
+	if p.isAdmin(evt.UserID) {
 		interrupt = "【重要！老大消息】" + interrupt
+	}
+
+	if text != "" {
+		text = stripCQRe.ReplaceAllString(text, "")
+		text = strings.TrimSpace(text)
+	}
+	if text == "" {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	if highRiskRe.MatchString(text) {
+		interrupt = "【⚠️ 高危信息，谨慎处理】" + interrupt
 	}
 
 	if evt.MessageType == "group" && p.sdk != nil {
@@ -943,7 +990,7 @@ func (p *Plugin) handleChannelOutput(args map[string]interface{}) (interface{}, 
 	payload, _ := args["payload"].(string)
 	rawType, _ := args["type"].(string)
 	meta, _ := args["meta"].(string)
-	log.Printf("[qq] handleChannelOutput payload=%q type=%s meta=%s", payload, rawType, meta)
+	log.Printf("[qq] handleChannelOutput type=%s payload_len=%d meta=%s", rawType, len(payload), meta)
 	if payload == "" || rawType == "" {
 		return nil, fmt.Errorf("payload 和 type 参数不能为空")
 	}
@@ -1108,7 +1155,7 @@ func (p *Plugin) handleSendFile(args map[string]interface{}) (interface{}, error
 	if name == "" {
 		name = filepath.Base(filePath)
 	}
-	name = p.sensitiveFilter(name)
+	name = sanitizeFilename(name)
 	asImage, _ := args["as_image"].(bool)
 
 	// copy to remote dir for NapCat container access
@@ -1312,7 +1359,7 @@ func (p *Plugin) handleResolveNickname(args map[string]interface{}) (interface{}
 	}
 	keyword = strings.ToLower(keyword)
 
-	gid, 	groupErr := convInt64(args["group_id"])
+	gid, groupErr := convInt64(args["group_id"])
 	if groupErr == nil {
 		v, err := p.napcat("get_group_member_list", map[string]interface{}{"group_id": gid})
 		if err != nil {
@@ -1526,20 +1573,11 @@ func (p *Plugin) handleFriendAction(args map[string]interface{}) (interface{}, e
 		// delete friend
 		p.napcat("delete_friend", map[string]interface{}{"user_id": uid})
 		// kick from groups
-		if gid, err := convInt64(args["group_id"]); err == nil {
-			p.napcat("set_group_kick", map[string]interface{}{"group_id": gid, "user_id": uid, "reject_add_request": true})
-		} else {
-			grps, _ := p.napcat("get_group_list", map[string]interface{}{})
-			if list, ok := grps.([]interface{}); ok {
-				for _, g := range list {
-					if m, ok := g.(map[string]interface{}); ok {
-						if gid, ok := m["group_id"].(float64); ok {
-							p.napcat("set_group_kick", map[string]interface{}{"group_id": int64(gid), "user_id": uid, "reject_add_request": true})
-						}
-					}
-				}
-			}
+		gid, err := convInt64(args["group_id"])
+		if err != nil {
+			return map[string]interface{}{"isError": true, "content": "block 必须提供 group_id（插件不会自动遍历所有群踢人）"}, nil
 		}
+		p.napcat("set_group_kick", map[string]interface{}{"group_id": gid, "user_id": uid, "reject_add_request": true})
 		return `{"status":"ok","message":"blocked"}`, nil
 	case "approve-friend":
 		flag, _ := args["flag"].(string)
@@ -1574,6 +1612,7 @@ func (p *Plugin) handleGetGroupFiles(args map[string]interface{}) (interface{}, 
 		if filename == "" {
 			filename = fmt.Sprintf("group_file_%s", fileID)
 		}
+		filename = sanitizeFilename(filename)
 		// get download URL
 		resp, err := p.napcat("get_group_file_url", map[string]interface{}{"group_id": gid, "file_id": fileID})
 		if err != nil {
@@ -1701,7 +1740,7 @@ func (p *Plugin) handleUploadGroupFile(args map[string]interface{}) (interface{}
 	if name == "" {
 		name = filepath.Base(filePath)
 	}
-	name = p.sensitiveFilter(name)
+	name = sanitizeFilename(name)
 
 	data, err := os.ReadFile(filePath)
 	if err != nil {
@@ -2000,8 +2039,8 @@ func (p *Plugin) handleReadDocument(args map[string]interface{}) (interface{}, e
 		result += fmt.Sprintf("\n\n...（内容过长，仅显示前 20000 字符，共 %d 字符）", origLen)
 	}
 	return map[string]interface{}{
-		"content": result,
-		"file":    path,
+		"content":   result,
+		"file":      path,
 		"truncated": truncated,
 	}, nil
 }
@@ -2218,6 +2257,8 @@ func rawString(v interface{}) (string, bool) {
 var reAPIKey = regexp.MustCompile(`(?i)(api[_-]?key|token|secret|password)\s*[=:]\s*\S+`)
 var reSKKey = regexp.MustCompile(`sk-[a-zA-Z0-9]{20,}`)
 var reInternalIP = regexp.MustCompile(`\b(127\.\d{1,3}\.\d{1,3}\.\d{1,3}|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3})\b`)
+var stripCQRe = regexp.MustCompile(`\[CQ:[^\]]*\]|\[mirai:[^\]]*\]`)
+var highRiskRe = regexp.MustCompile(`(假如你是|你现在是|请你(扮演|化作|假装|成为)|扮演(一个|一下)|把你自己(想象|当成)|你的(人设|设定)是|穿越(到|回)|你是从.{0,10}(来|穿越)|帮我编(个|一个)故事|写(个|一个)故事让|故事(中|里)的|觉得(这个|这台|这家)?(机器人|AI|助手|ai).{0,8}(怎么样|如何|好不好|评价)|评价(下|一下)?(这个|这台|这家)?(机器人|AI|助手|ai|gpt)|忽略(之前|所有)?(指令|规则|限制|禁令)|解除.{0,6}(限制|规则|约束)|越狱|绕过.{0,6}(限制|审查)|不用(遵守|管)(任何)?(规则|限制|指令)|无视(所有)?(规则|指令)|你是(一个|一只)自由的)`)
 
 func (p *Plugin) sensitiveFilter(text string) string {
 	if p.remoteDir != "" {
@@ -2260,9 +2301,3 @@ func NewPluginFactory(name string, config map[string]interface{}) (sdk.Plugin, e
 		groupPolicy:    "open",
 	}, nil
 }
-
-
-
-
-
-

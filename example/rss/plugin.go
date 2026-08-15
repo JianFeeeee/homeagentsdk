@@ -16,6 +16,8 @@ import (
 	"github.com/mmcdole/gofeed"
 )
 
+const injectDedupWindow = 5 * time.Minute
+
 type FeedSub struct {
 	URL      string `json:"url"`
 	Title    string `json:"title"`
@@ -32,7 +34,9 @@ type Plugin struct {
 	mu         sync.RWMutex
 	feeds      []FeedSub
 	seenGUIDs  map[string]bool
+	injected   map[string]time.Time
 	stopCh     chan struct{}
+	stopOnce   sync.Once
 	wg         sync.WaitGroup
 	pollTicker *time.Ticker
 }
@@ -103,14 +107,17 @@ func (p *Plugin) Start(s *sdk.PluginSDK) error {
 	p.fp = gofeed.NewParser()
 	p.stopCh = make(chan struct{})
 	p.seenGUIDs = make(map[string]bool)
+	p.injected = make(map[string]time.Time)
 	p.feeds = []FeedSub{}
 
-	dataHome := os.Getenv("HOME")
-	if dataHome == "" {
-		dataHome = "/tmp"
+	dataDirVal, err := s.Settings().GetCore("core.daemon.data_dir")
+	if err != nil || dataDirVal == "" {
+		dataDirVal = "."
 	}
-	p.dataDir = filepath.Join(dataHome, ".homeagent", "rss")
-	os.MkdirAll(p.dataDir, 0755)
+	p.dataDir = filepath.Join(fmt.Sprint(dataDirVal), "rss")
+	if err := os.MkdirAll(p.dataDir, 0755); err != nil {
+		fmt.Printf("[%s] mkdir %s: %v\n", p.name, p.dataDir, err)
+	}
 	p.loadData()
 
 	// 卸载（删除）时清理订阅数据目录；重载不触发
@@ -179,7 +186,7 @@ func (p *Plugin) Start(s *sdk.PluginSDK) error {
 }
 
 func (p *Plugin) Stop() error {
-	close(p.stopCh)
+	p.stopOnce.Do(func() { close(p.stopCh) })
 	p.pollTicker.Stop()
 	p.wg.Wait()
 	p.saveData()
@@ -251,9 +258,34 @@ func (p *Plugin) checkFeed(sub FeedSub) {
 		return
 	}
 
-	var lines []string
-	lines = append(lines, fmt.Sprintf("📡 %s (%s) — %d 篇新文章:", title, sub.URL, len(newArticles)))
+	now := time.Now()
+	toInject := make([]*gofeed.Item, 0, len(newArticles))
+	p.mu.Lock()
 	for _, item := range newArticles {
+		guid := item.GUID
+		if guid == "" {
+			guid = item.Link
+		}
+		if guid == "" {
+			continue
+		}
+		key := sub.URL + "|" + guid
+		if t, ok := p.injected[key]; ok && now.Sub(t) < injectDedupWindow {
+			continue
+		}
+		p.injected[key] = now
+		p.seenGUIDs[key] = true
+		toInject = append(toInject, item)
+	}
+	p.mu.Unlock()
+
+	if len(toInject) == 0 {
+		return
+	}
+
+	var lines []string
+	lines = append(lines, fmt.Sprintf("📡 %s (%s) — %d 篇新文章:", title, sub.URL, len(toInject)))
+	for _, item := range toInject {
 		pubDate := ""
 		if item.PublishedParsed != nil {
 			pubDate = item.PublishedParsed.Format("01-02 15:04")
@@ -269,19 +301,6 @@ func (p *Plugin) checkFeed(sub FeedSub) {
 	}
 
 	p.sdk.InjectInterruptText("rss", "rss", strings.Join(lines, "\n"))
-
-	p.mu.Lock()
-	for _, item := range newArticles {
-		guid := item.GUID
-		if guid == "" {
-			guid = item.Link
-		}
-		if guid == "" {
-			continue
-		}
-		p.seenGUIDs[sub.URL+"|"+guid] = true
-	}
-	p.mu.Unlock()
 	p.saveData()
 }
 
@@ -323,6 +342,7 @@ func (p *Plugin) handleSubscribe(args map[string]interface{}) (interface{}, erro
 	}
 
 	guidCount := 0
+	p.mu.Lock()
 	for _, item := range parsed.Items {
 		guid := item.GUID
 		if guid == "" {
@@ -334,6 +354,7 @@ func (p *Plugin) handleSubscribe(args map[string]interface{}) (interface{}, erro
 		p.seenGUIDs[url+"|"+guid] = true
 		guidCount++
 	}
+	p.mu.Unlock()
 
 	p.mu.Lock()
 	p.feeds = append(p.feeds, sub)
@@ -398,7 +419,16 @@ func (p *Plugin) handleList(args map[string]interface{}) (interface{}, error) {
 }
 
 func (p *Plugin) handleCheckNow(args map[string]interface{}) (interface{}, error) {
-	go p.checkAllFeeds()
+	select {
+	case <-p.stopCh:
+		return map[string]interface{}{"isError": true, "content": "plugin is stopping"}, nil
+	default:
+	}
+	p.wg.Add(1)
+	go func() {
+		defer p.wg.Done()
+		p.checkAllFeeds()
+	}()
 	return map[string]interface{}{"content": "Checking all feeds for updates..."}, nil
 }
 
@@ -442,8 +472,16 @@ func (p *Plugin) saveData() {
 
 // cleanupData 卸载时清理订阅数据目录（feeds.json 等）
 func (p *Plugin) cleanupData() {
-	if p.dataDir != "" {
-		os.RemoveAll(p.dataDir)
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.dataDir == "" {
+		return
+	}
+	for _, f := range []string{"feeds.json"} {
+		path := filepath.Join(p.dataDir, f)
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			fmt.Printf("[%s] onRemove cleanup %s: %v\n", p.name, path, err)
+		}
 	}
 }
 

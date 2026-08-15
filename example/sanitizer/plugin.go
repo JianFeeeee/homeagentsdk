@@ -27,7 +27,9 @@ var (
 	toolCodeBlockRE2 = regexp.MustCompile("(?s)```(?:xml|json)?\\s*<tool[^>]*>.*?</tool>\\s*```")
 	chineseMarkerRE = regexp.MustCompile(`(?s)【tool_call】.*?【/tool_call】`)
 	multiNewlineRE  = regexp.MustCompile(`\n{3,}`)
-	toolNameRE      = regexp.MustCompile(`^(cmd_run|terminal_create|terminal_write|memory_|knowledge_|doc_|social_|output_send|output_set_channel|llm_|plgreload|spawn_child|child_result|describe_image|transcribe_audio|ocr_image|timer_set|plugin_install|plugin_remove|qq_|a2a_|mcp_|healthcheck|files_|web_)`)
+	toolNameRE      = regexp.MustCompile(`^(cmd_run|terminal_create|terminal_write|memory_|knowledge_|doc_|social_|output_set_channel|output_send|llm_|plgreload|spawn_child|child_result|describe_image|transcribe_audio|ocr_image|timer_set|plugin_install|plugin_remove|qq_|a2a_|mcp_|healthcheck|files_|web_)`)
+	placeholderRE   = regexp.MustCompile(`(?i)\{\{\s*tool\s*[:：][^}]*\}\}`)
+	atToolRE        = regexp.MustCompile(`(?i)^@\s*tool\b`)
 )
 
 type Plugin struct{}
@@ -83,8 +85,12 @@ func cleanToolCallLeakage(content string) string {
 			cleaned = append(cleaned, line)
 			continue
 		}
-		if toolNameRE.MatchString(trimmed) {
-			if strings.Contains(trimmed, "(") || strings.Contains(trimmed, "\"") || strings.Contains(trimmed, ":") {
+		if placeholderRE.MatchString(trimmed) || atToolRE.MatchString(trimmed) {
+			continue
+		}
+		if m := toolNameRE.FindStringIndex(trimmed); m != nil {
+			rest := trimmed[m[1]:]
+			if strings.HasPrefix(rest, "(") && strings.Contains(rest, ")") {
 				continue
 			}
 		}

@@ -27,24 +27,39 @@ func (p *Plugin) Start(s *sdk.PluginSDK) error {
 	p.sdk = s
 	s.Settings().RegisterDef(sdk.ConfigDef{
 		Key:         "dir",
-		Default:     "/",
+		Default:     "",
 		Type:        "string",
 		DisplayName: "文件系统根目录",
-		Description: "文件操作允许访问的根目录（设为 / 表示完整主机文件系统）",
+		Description: "文件操作允许访问的根目录；留空时使用默认沙箱目录（主数据目录/files_sandbox），不建议设为 /",
 		Category:    "files",
 	})
 
-	dir := getSetting[string](s.Settings(), "dir", "/")
+	dir := getSetting[string](s.Settings(), "dir", "")
 	if strings.HasPrefix(dir, "~/") {
 		home, _ := os.UserHomeDir()
 		dir = filepath.Join(home, dir[2:])
+	}
+	if dir == "" {
+		dataDir, err := s.Settings().GetCore("core.daemon.data_dir")
+		base := "."
+		if err == nil {
+			if ds, ok := dataDir.(string); ok && ds != "" {
+				base = ds
+			}
+		}
+		dir = filepath.Join(base, "files_sandbox")
 	}
 	abs, err := filepath.Abs(dir)
 	if err != nil {
 		return fmt.Errorf("resolve files.dir: %w", err)
 	}
+	if err := os.MkdirAll(abs, 0755); err != nil {
+		return fmt.Errorf("mkdir files.dir: %w", err)
+	}
+	if real, err := filepath.EvalSymlinks(abs); err == nil {
+		abs = real
+	}
 	p.filesDir = abs
-	os.MkdirAll(p.filesDir, 0755)
 
 	tp := p.name + "_"
 
@@ -143,10 +158,60 @@ func (p *Plugin) resolvePath(userPath string) (string, error) {
 		return "", fmt.Errorf("resolve path: %w", err)
 	}
 	base := filepath.Clean(p.filesDir)
-	if base != "/" && !strings.HasPrefix(abs, base+string(filepath.Separator)) && abs != base {
+	if !withinSandbox(base, abs) {
 		return "", fmt.Errorf("path outside sandbox: %s", userPath)
 	}
-	return abs, nil
+	real, err := evalReal(base, abs)
+	if err != nil {
+		return "", err
+	}
+	if !withinSandbox(base, real) {
+		return "", fmt.Errorf("path escapes sandbox via symlink: %s", userPath)
+	}
+	return real, nil
+}
+
+func withinSandbox(base, abs string) bool {
+	if base == "/" {
+		return true
+	}
+	return abs == base || strings.HasPrefix(abs, base+string(filepath.Separator))
+}
+
+func evalReal(base, abs string) (string, error) {
+	existing := abs
+	var tail []string
+	for {
+		real, err := filepath.EvalSymlinks(existing)
+		if err == nil {
+			full := real
+			for i := len(tail) - 1; i >= 0; i-- {
+				full = filepath.Join(full, tail[i])
+			}
+			return full, nil
+		}
+		if !os.IsNotExist(err) {
+			return "", fmt.Errorf("resolve path: %w", err)
+		}
+		if link, lerr := os.Readlink(existing); lerr == nil {
+			target := link
+			if !filepath.IsAbs(target) {
+				target = filepath.Join(filepath.Dir(existing), target)
+			}
+			if t, aerr := filepath.Abs(target); aerr == nil {
+				target = filepath.Clean(t)
+			}
+			if !withinSandbox(base, target) {
+				return "", fmt.Errorf("path escapes sandbox via symlink: %s", abs)
+			}
+		}
+		parent := filepath.Dir(existing)
+		if parent == existing {
+			return "", fmt.Errorf("resolve path: %w", err)
+		}
+		tail = append(tail, filepath.Base(existing))
+		existing = parent
+	}
 }
 
 // handleRead implements the read tool.

@@ -37,6 +37,7 @@ type Plugin struct {
 	nextID   int
 	wg       sync.WaitGroup
 	stopCh   chan struct{}
+	stopOnce sync.Once
 }
 
 type BrowserSession struct {
@@ -273,7 +274,7 @@ func (p *Plugin) Start(s *sdk.PluginSDK) error {
 			"properties": map[string]interface{}{
 				"id":     map[string]interface{}{"type": "string", "description": "浏览器会话 ID"},
 				"full":   map[string]interface{}{"type": "boolean", "description": "是否全页截图(默认 false，仅视口)"},
-				"format": map[string]interface{}{"type": "string", "description": "图片格式: png 或 jpeg(默认 png)"},
+				"format": map[string]interface{}{"type": "string", "description": "图片格式: 仅支持 png(默认 png)"},
 			},
 			"required": []string{"id"},
 		},
@@ -356,18 +357,20 @@ func (p *Plugin) Start(s *sdk.PluginSDK) error {
 }
 
 func (p *Plugin) Stop() error {
-	close(p.stopCh)
-	p.wg.Wait()
-	if p.client != nil {
-		p.client.CloseIdleConnections()
-	}
-	p.mu.Lock()
-	for _, s := range p.sessions {
-		s.Close()
-	}
-	p.sessions = nil
-	p.mu.Unlock()
-	log.Printf("[%s] stopped", p.name)
+	p.stopOnce.Do(func() {
+		close(p.stopCh)
+		p.wg.Wait()
+		if p.client != nil {
+			p.client.CloseIdleConnections()
+		}
+		p.mu.Lock()
+		for _, s := range p.sessions {
+			s.Close()
+		}
+		p.sessions = nil
+		p.mu.Unlock()
+		log.Printf("[%s] stopped", p.name)
+	})
 	return nil
 }
 
@@ -665,6 +668,9 @@ func (p *Plugin) handleRender(args map[string]interface{}) (interface{}, error) 
 	if rawURL == "" {
 		return errResult("url is required"), nil
 	}
+	if err := p.ssrfCheck(rawURL); err != nil {
+		return errResult(err.Error()), nil
+	}
 	waitSec := int64(readArg(args, "wait", float64(0)))
 	if waitSec > 0 {
 		time.Sleep(time.Duration(waitSec) * time.Second)
@@ -766,7 +772,7 @@ func (p *Plugin) handleBrowserStart(args map[string]interface{}) (interface{}, e
 			return errResult("navigate failed: " + err.Error()), nil
 		}
 		session.currentURL = initURL
-		p.sdk.InjectText(p.name, p.name, fmt.Sprintf("[浏览器 %s 已打开 %s]", id, initURL))
+		p.sdk.InjectTextNoMemory(p.name, p.name, fmt.Sprintf("[浏览器 %s 已打开 %s]", id, initURL))
 	}
 
 	log.Printf("[%s] created browser session %s: url=%s timeout=%v", p.name, id, initURL, timeout)
@@ -807,7 +813,7 @@ func (p *Plugin) handleNavigate(args map[string]interface{}) (interface{}, error
 		return errResult("navigate failed: " + err.Error()), nil
 	}
 	s.currentURL = rawURL
-	p.sdk.InjectText(p.name, p.name, fmt.Sprintf("[浏览器 %s 已导航到 %s]", id, rawURL))
+	p.sdk.InjectTextNoMemory(p.name, p.name, fmt.Sprintf("[浏览器 %s 已导航到 %s]", id, rawURL))
 	return map[string]interface{}{"status": "ok", "url": rawURL}, nil
 }
 
@@ -825,6 +831,9 @@ func (p *Plugin) handleScreenshot(args map[string]interface{}) (interface{}, err
 		full = v
 	}
 	format := readArg(args, "format", "png")
+	if format != "png" {
+		return errResult("仅支持 png 格式"), nil
+	}
 	var buf []byte
 	var err error
 	if full {
@@ -841,7 +850,7 @@ func (p *Plugin) handleScreenshot(args map[string]interface{}) (interface{}, err
 		"format":    format,
 		"size":      len(buf),
 		"base64":    b64,
-		"data_uri":  fmt.Sprintf("data:image/%s;base64,%s", format, b64),
+		"data_uri":  fmt.Sprintf("data:image/png;base64,%s", b64),
 	}, nil
 }
 
@@ -1001,9 +1010,9 @@ func (p *Plugin) cleanupLoop() {
 			for id, s := range p.sessions {
 				if time.Since(s.createdAt) >= s.timeout {
 					log.Printf("[%s] cleanup: browser session %s expired", p.name, id)
-					delete(p.sessions, id)
-					go s.Close()
-					p.sdk.InjectText(p.name, p.name, fmt.Sprintf("[浏览器会话 %s 已超时关闭]", id))
+				delete(p.sessions, id)
+				s.Close()
+				p.sdk.InjectInterruptText(p.name, p.name, fmt.Sprintf("[浏览器会话 %s 已超时关闭]", id))
 				}
 			}
 			p.mu.Unlock()

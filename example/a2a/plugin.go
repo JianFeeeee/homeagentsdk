@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"gitcode.com/JianFeeeee/homeagent-sdk/sdk"
@@ -17,6 +18,7 @@ import (
 type Plugin struct {
 	name       string
 	sdk        *sdk.PluginSDK
+	srvMu      sync.Mutex
 	server     *http.Server
 	serverAddr string
 }
@@ -97,7 +99,9 @@ func (p *Plugin) Start(s *sdk.PluginSDK) error {
 	// Inbound HTTP server
 	if addr, _ := s.Settings().Get("listen"); addr != nil {
 		if addrStr, ok := addr.(string); ok && addrStr != "" {
-			p.startServer(addrStr)
+			if err := p.startServer(addrStr); err != nil {
+				log.Printf("[%s] start A2A server: %v", p.name, err)
+			}
 		}
 	}
 
@@ -111,6 +115,8 @@ func (p *Plugin) Stop() error {
 }
 
 func (p *Plugin) stopServer() {
+	p.srvMu.Lock()
+	defer p.srvMu.Unlock()
 	if p.server != nil {
 		p.server.Close()
 		p.server = nil
@@ -120,7 +126,7 @@ func (p *Plugin) stopServer() {
 
 // ---- Inbound HTTP Server ----
 
-func (p *Plugin) startServer(addr string) {
+func (p *Plugin) startServer(addr string) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/agent-card", p.handleAgentCard)
 	mux.HandleFunc("/task", p.handleIncomingTask)
@@ -128,18 +134,27 @@ func (p *Plugin) startServer(addr string) {
 
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
-		log.Printf("[%s] listen %s: %v", p.name, addr, err)
-		return
+		return fmt.Errorf("listen %s: %v", addr, err)
 	}
 
-	p.server = &http.Server{Handler: mux}
-	p.serverAddr = listener.Addr().String()
+	srv := &http.Server{Handler: mux}
+	addrStr := listener.Addr().String()
+
+	p.srvMu.Lock()
+	if p.server != nil {
+		p.server.Close()
+	}
+	p.server = srv
+	p.serverAddr = addrStr
+	p.srvMu.Unlock()
+
 	go func() {
-		log.Printf("[%s] A2A server on %s", p.name, p.serverAddr)
-		if err := p.server.Serve(listener); err != nil && err != http.ErrServerClosed {
+		log.Printf("[%s] A2A server on %s", p.name, addrStr)
+		if err := srv.Serve(listener); err != nil && err != http.ErrServerClosed {
 			log.Printf("[%s] serve: %v", p.name, err)
 		}
 	}()
+	return nil
 }
 
 func (p *Plugin) handleAgentCard(w http.ResponseWriter, r *http.Request) {
@@ -411,24 +426,21 @@ func (p *Plugin) handleA2AQuery(args map[string]interface{}) (interface{}, error
 
 func (p *Plugin) handleConfigure(args map[string]interface{}) (interface{}, error) {
 	listen, _ := args["listen"].(string)
-	if listen == "" {
-		return "参数 listen 不能为空。设为空字符串可禁用 HTTP 服务。", nil
-	}
+	listen = strings.TrimSpace(listen)
 
 	if err := p.sdk.Settings().Set("listen", listen); err != nil {
 		return fmt.Sprintf("保存配置失败: %v", err), nil
 	}
 
-	p.stopServer()
-	if listen != "" {
-		p.startServer(listen)
+	if listen == "" || listen == "off" || listen == "disabled" {
+		p.stopServer()
+		return "A2A HTTP 服务已禁用（listen 设为空）", nil
 	}
 
-	status := "已启动"
-	if listen == "" {
-		status = "已禁用"
+	if err := p.startServer(listen); err != nil {
+		return fmt.Sprintf("A2A 配置已保存，但服务启动失败: %v", err), nil
 	}
-	return fmt.Sprintf("A2A 配置已更新。监听地址: %s (%s)", listen, status), nil
+	return fmt.Sprintf("A2A 配置已更新。监听地址: %s (已启动)", listen), nil
 }
 
 func (p *Plugin) handleRestart(args map[string]interface{}) (interface{}, error) {
@@ -436,23 +448,28 @@ func (p *Plugin) handleRestart(args map[string]interface{}) (interface{}, error)
 
 	addr, _ := p.sdk.Settings().Get("listen")
 	addrStr, _ := addr.(string)
-	if addrStr == "" {
+	if addrStr == "" || addrStr == "off" || addrStr == "disabled" {
 		return "A2A 服务未配置监听地址（listen 为空），无法启动", nil
 	}
 
-	p.startServer(addrStr)
-	if p.server == nil {
-		return fmt.Sprintf("A2A 服务启动失败，请检查监听地址: %s", addrStr), nil
+	if err := p.startServer(addrStr); err != nil {
+		return fmt.Sprintf("A2A 服务启动失败: %v", err), nil
 	}
-	return fmt.Sprintf("A2A 服务已重启，监听: %s", p.serverAddr), nil
+
+	p.srvMu.Lock()
+	listening := p.serverAddr
+	p.srvMu.Unlock()
+	return fmt.Sprintf("A2A 服务已重启，监听: %s", listening), nil
 }
 
 func (p *Plugin) handleStatus(args map[string]interface{}) (interface{}, error) {
 	addr, _ := p.sdk.Settings().Get("listen")
 	addrStr, _ := addr.(string)
 
+	p.srvMu.Lock()
 	serverRunning := p.server != nil
 	listening := p.serverAddr
+	p.srvMu.Unlock()
 	if !serverRunning {
 		listening = "未运行"
 	}

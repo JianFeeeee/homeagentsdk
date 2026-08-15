@@ -134,6 +134,18 @@ func readArg[T string | int64 | float64](args map[string]interface{}, key string
 	return fallback
 }
 
+func readArgBool(args map[string]interface{}, key string) bool {
+	if v, ok := args[key]; ok && v != nil {
+		if b, ok := v.(bool); ok {
+			return b
+		}
+		if s, ok := v.(string); ok {
+			return s == "1" || strings.EqualFold(s, "true")
+		}
+	}
+	return false
+}
+
 // --- Time Helpers ---
 
 var shortWeekday = map[time.Weekday]string{
@@ -264,12 +276,14 @@ func nextLunarYearly(targetMonth, targetDay int, after time.Time) (time.Time, bo
 func (p *Plugin) Start(s *sdk.PluginSDK) error {
 	p.sdk = s
 
-	dataHome := os.Getenv("HOME")
-	if dataHome == "" {
-		dataHome = "/tmp"
+	dataDirVal, err := s.Settings().GetCore("core.daemon.data_dir")
+	if err != nil || dataDirVal == "" {
+		dataDirVal = "."
 	}
-	p.dataDir = filepath.Join(dataHome, ".homeagent", "calendar")
-	os.MkdirAll(p.dataDir, 0755)
+	p.dataDir = filepath.Join(fmt.Sprint(dataDirVal), "calendar")
+	if err := os.MkdirAll(p.dataDir, 0755); err != nil {
+		fmt.Printf("[%s] mkdir %s: %v\n", p.name, p.dataDir, err)
+	}
 	p.loadEvents()
 
 	// 持久化交由 stop handler：内核会在调用 Stop() 之前执行，
@@ -414,9 +428,9 @@ func (p *Plugin) checkReminders() {
 	now := time.Now()
 
 	p.mu.Lock()
-	defer p.mu.Unlock()
 
 	changed := false
+	var injectMsgs []string
 
 	for i := range p.events {
 		e := &p.events[i]
@@ -458,7 +472,7 @@ func (p *Plugin) checkReminders() {
 			if e.Note != "" {
 				msg += fmt.Sprintf("\n📝 %s", e.Note)
 			}
-			go p.sdk.InjectInterruptText("calendar", "calendar", msg)
+			injectMsgs = append(injectMsgs, msg)
 		}
 	}
 
@@ -502,6 +516,11 @@ func (p *Plugin) checkReminders() {
 	p.cleanupPastEvents()
 	if changed {
 		p.saveEventsLocked()
+	}
+	p.mu.Unlock()
+
+	for _, msg := range injectMsgs {
+		p.sdk.InjectInterruptText("calendar", "calendar", msg)
 	}
 }
 
@@ -713,10 +732,7 @@ func (p *Plugin) handleEventAdd(args map[string]interface{}) (interface{}, error
 	note := readArg(args, "note", "")
 	remindStr := readArg(args, "remind_before", "")
 	reminds := parseReminds(remindStr)
-	lunar := false
-	if v := readArg(args, "lunar", ""); v == "true" {
-		lunar = true
-	}
+	lunar := readArgBool(args, "lunar")
 	lunarMonth := int(readArg(args, "lunar_month", int64(0)))
 	lunarDay := int(readArg(args, "lunar_day", int64(0)))
 
@@ -918,10 +934,12 @@ func (p *Plugin) handleEventUpdate(args map[string]interface{}) (interface{}, er
 				e.Repeat = v
 			}
 		}
-		if v := readArg(args, "lunar", ""); v == "true" {
-			e.Lunar = true
-		} else if v == "false" {
-			e.Lunar = false
+		if v, ok := args["lunar"]; ok && v != nil {
+			if b, ok := v.(bool); ok {
+				e.Lunar = b
+			} else if s, ok := v.(string); ok {
+				e.Lunar = s == "1" || strings.EqualFold(s, "true")
+			}
 		}
 		if v := readArg(args, "lunar_month", int64(0)); v > 0 {
 			e.LunarMonth = int(v)

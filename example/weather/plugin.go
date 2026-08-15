@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -19,7 +17,6 @@ type Plugin struct {
 	sdk        *sdk.PluginSDK
 	client     *http.Client
 	defaultLoc string
-	dataDir    string
 }
 
 func NewPluginFactory(name string, config map[string]interface{}) (sdk.Plugin, error) {
@@ -44,16 +41,6 @@ func (p *Plugin) Start(s *sdk.PluginSDK) error {
 			p.defaultLoc = vs
 		}
 	}
-
-	dataHome := os.Getenv("HOME")
-	if dataHome == "" {
-		dataHome = "/tmp"
-	}
-	p.dataDir = filepath.Join(dataHome, ".homeagent", "weather")
-	os.MkdirAll(p.dataDir, 0755)
-
-	// 卸载（删除）时清理天气缓存目录；重载不触发
-	s.RegisterOnRemoveHandler(p.cleanupData)
 
 	tp := p.name + "_"
 	s.RegisterTool(tp+"current", sdk.ToolDef{
@@ -299,15 +286,6 @@ func (p *Plugin) handleCurrent(args map[string]interface{}) (interface{}, error)
 		cc.Humidity, cc.WindspeedKmph, windUnit, cc.Winddir16Point,
 		obsTime)
 
-	// 文本记忆：每次查询写入一条历史记录（role=tool 便于追溯）
-	if p.sdk.TextMemory() != nil {
-		_ = p.sdk.TextMemory().Append(sdk.TextEvent{
-			Role:    "tool",
-			Content: fmt.Sprintf("weather %s: %s", place, desc),
-			Channel: p.name,
-		})
-	}
-
 	return map[string]interface{}{
 		"content":    result,
 		"location":   place,
@@ -395,7 +373,11 @@ func (p *Plugin) handleForecast(args map[string]interface{}) (interface{}, error
 			sunset = day.Astronomy[0].Sunset
 		}
 
-		line := fmt.Sprintf("  %s %s/%s — %s~%s%s %s", weekday, day.Date[5:], day.Date[8:], minT, maxT, unitStr, desc)
+		datePart := ""
+		if len(day.Date) >= 8 {
+			datePart = day.Date[5:7] + "/" + day.Date[8:]
+		}
+		line := fmt.Sprintf("  %s %s — %s~%s%s %s", weekday, datePart, minT, maxT, unitStr, desc)
 		if precip != "" {
 			line += precip
 		}
@@ -427,11 +409,4 @@ func (p *Plugin) handleSetLocation(args map[string]interface{}) (interface{}, er
 	p.sdk.Settings().Set("default_location", loc)
 	p.defaultLoc = loc
 	return map[string]interface{}{"content": fmt.Sprintf("Default location set to: %s", loc)}, nil
-}
-
-// cleanupData 卸载时清理天气缓存目录
-func (p *Plugin) cleanupData() {
-	if p.dataDir != "" {
-		os.RemoveAll(p.dataDir)
-	}
 }

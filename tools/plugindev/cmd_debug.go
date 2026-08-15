@@ -172,4 +172,4 @@ func debugGo(dir string, replaces []string) {
 	}
 }
 
-var _ = strings.TrimSpace
+

@@ -48,13 +48,15 @@ func (p *Plugin) Start(s *sdk.PluginSDK) error {
 	s.SetAutoRestart(true)
 	p.sdk = s
 	p.tp = p.name + "_"
-	p.stopCh = make(chan struct{})
 
 	dataDirVal, err := s.Settings().GetCore("core.daemon.data_dir")
 	if err != nil || dataDirVal == "" {
 		dataDirVal = "."
 	}
-	dir := fmt.Sprint(dataDirVal)
+	dir := filepath.Join(fmt.Sprint(dataDirVal), p.name)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		log.Printf("[%s] mkdir data dir %s: %v", p.name, dir, err)
+	}
 	p.todoPath = filepath.Join(dir, "todos.json")
 	p.memoPath = filepath.Join(dir, "memos.json")
 	p.loadTodos()
@@ -96,6 +98,18 @@ func (p *Plugin) Start(s *sdk.PluginSDK) error {
 			"properties": map[string]interface{}{},
 		},
 	}, p.handleTodoList)
+
+	s.RegisterTool(p.tp+"todo_delete", sdk.ToolDef{
+		Name:        p.tp + "todo_delete",
+		Description: "删除指定ID的待办事项（包括已完成的）。",
+		Parameters: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"id": map[string]interface{}{"type": "integer", "description": "待办ID"},
+			},
+			"required": []string{"id"},
+		},
+	}, p.handleTodoDelete)
 
 	// ── 备忘（纯记事，不提醒）──
 	s.RegisterTool(p.tp+"memo_create", sdk.ToolDef{
@@ -204,18 +218,22 @@ func (p *Plugin) loadMemos() {
 }
 
 func (p *Plugin) saveTodos() {
+	p.mu.RLock()
 	data, _ := json.MarshalIndent(map[string]interface{}{
 		"todos":   p.todos,
 		"next_id": p.nextTID,
 	}, "", "  ")
+	p.mu.RUnlock()
 	os.WriteFile(p.todoPath, data, 0644)
 }
 
 func (p *Plugin) saveMemos() {
+	p.mu.RLock()
 	data, _ := json.MarshalIndent(map[string]interface{}{
 		"memos":   p.memos,
 		"next_id": p.nextMID,
 	}, "", "  ")
+	p.mu.RUnlock()
 	os.WriteFile(p.memoPath, data, 0644)
 }
 
@@ -357,6 +375,33 @@ func (p *Plugin) handleTodoList(args map[string]interface{}) (interface{}, error
 	}, nil
 }
 
+func (p *Plugin) handleTodoDelete(args map[string]interface{}) (interface{}, error) {
+	id, ok := args["id"].(float64)
+	if !ok {
+		return errorResult("id is required"), nil
+	}
+
+	p.mu.Lock()
+	found := false
+	for i := range p.todos {
+		if p.todos[i].ID == int64(id) {
+			p.todos = append(p.todos[:i], p.todos[i+1:]...)
+			found = true
+			break
+		}
+	}
+	p.mu.Unlock()
+
+	if !found {
+		return errorResult(fmt.Sprintf("未找到待办 ID: %d", int64(id))), nil
+	}
+	p.saveTodos()
+
+	return map[string]interface{}{
+		"content": fmt.Sprintf("待办 %d 已删除", int64(id)),
+	}, nil
+}
+
 // ── 备忘工具 ──
 
 func (p *Plugin) handleMemoCreate(args map[string]interface{}) (interface{}, error) {
@@ -443,7 +488,7 @@ func errorResult(msg string) map[string]interface{} {
 }
 
 func NewPluginFactory(name string, config map[string]interface{}) (sdk.Plugin, error) {
-	return &Plugin{name: name}, nil
+	return &Plugin{name: name, stopCh: make(chan struct{})}, nil
 }
 
 // cleanupData 卸载时清理数据文件（待办 + 备忘）
