@@ -76,9 +76,13 @@ function plugin.start(sdk)
     return nil
   end, "own_tools")
 
-  -- 阶段钩子：全局作用域
+  -- 阶段钩子：全局作用域（修改 ctx 字段会写回内核，见 applyLuaStageResult）
   sdk.register_stage("pre_action", function(ctx)
     sdk.log("info", "luademo stage pre_action: user=" .. tostring(ctx.user_id))
+    -- 演示 stage 写回：给 llm_text 追加标记（内核会同步回 StageContext）
+    if ctx.llm_text then
+      ctx.llm_text = ctx.llm_text .. "[luademo]"
+    end
     return nil
   end)
 
