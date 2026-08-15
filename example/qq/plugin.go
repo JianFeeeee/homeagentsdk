@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net"
 	"net/http"
 	"os"
@@ -585,6 +586,11 @@ func parseIDList(raw string) []int64 {
 		}
 		if n, err := strconv.ParseInt(part, 10, 64); err == nil && n > 0 {
 			out = append(out, n)
+			continue
+		}
+		// 兼容历史坏数据：科学计数法存库的值（如 2.198972886e+09）
+		if f, err := strconv.ParseFloat(part, 64); err == nil && f > 0 && f == math.Trunc(f) {
+			out = append(out, int64(f))
 		}
 	}
 	return out
