@@ -113,7 +113,7 @@ func cmdInit(args []string) {
 			Targets:     targets,
 		},
 		IsLua:       isLua,
-		CABIVersion: meta.ABIVersion,
+		CABIVersion: meta.CABINum,
 		CABIHeader:  tmplCABIHeader,
 	}
 

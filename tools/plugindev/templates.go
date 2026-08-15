@@ -330,8 +330,8 @@ func main() {}
 const tmplCABIHeader = `
 #ifndef HOMEAGENT_CABI_H
 #define HOMEAGENT_CABI_H
-// HOMEAGENT_ABI_VERSION 与 sdk/meta/meta.go ABIVersion 同步
-#define HOMEAGENT_ABI_VERSION 1
+// HOMEAGENT_ABI_VERSION 与 sdk/meta/meta.go CABINum 同步（major*100+minor，v0.9.x→900）
+#define HOMEAGENT_ABI_VERSION 900
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -343,7 +343,7 @@ typedef struct {
     int (*start_plugin)(void*, int, char**);
     int (*stop_plugin)(char**);
     int (*invoke_tool)(char*, char*, char**, char**);
-    int (*invoke_stage)(char*, char*, char**);
+    int (*invoke_stage)(char*, char*, char**, char**);
     int (*invoke_output)(char*, char*, char*, char**);
     void (*free_string)(char*);
 } PluginAPI;
@@ -684,8 +684,53 @@ func go_invoke_tool(name *C.char, argsJSON *C.char, resultOut **C.char, errorOut
 	return 0
 }
 
+// fillStageContext 将内核传来的 ctx JSON 填充到插件侧 StageContext。
+func fillStageContext(sc *sdk.StageContext, ctxJSON string) {
+	var m map[string]interface{}
+	if err := json.Unmarshal([]byte(ctxJSON), &m); err != nil {
+		return
+	}
+	if v, _ := m["raw_message"].(string); v != "" { sc.RawMessage = v }
+	if v, _ := m["user_id"].(string); v != "" { sc.UserID = v }
+	if v, _ := m["group_id"].(string); v != "" { sc.GroupID = v }
+	if v, _ := m["phase"].(string); v != "" { sc.Phase = sdk.Stage(v) }
+	if v, _ := m["llm_text"].(string); v != "" { sc.LLMText = v }
+	if v, _ := m["final_text"].(string); v != "" { sc.FinalText = v }
+	if v, _ := m["no_memory"].(bool); v { sc.NoMemory = true }
+	if v, _ := m["response"].(string); v != "" { sc.Response = &v }
+	if v, _ := m["tool_calls"].([]interface{}); len(v) > 0 {
+		b, _ := json.Marshal(v); json.Unmarshal(b, &sc.ToolCalls)
+	}
+	if v, _ := m["tool_results"].([]interface{}); len(v) > 0 {
+		b, _ := json.Marshal(v); json.Unmarshal(b, &sc.ToolResults)
+	}
+}
+
+// stageContextWritable 提取插件可写且内核会同步回去的字段。
+func stageContextWritable(sc *sdk.StageContext) map[string]interface{} {
+	m := map[string]interface{}{
+		"raw_message": sc.RawMessage,
+		"user_id":     sc.UserID,
+		"group_id":    sc.GroupID,
+		"phase":       string(sc.Phase),
+		"llm_text":    sc.LLMText,
+		"final_text":  sc.FinalText,
+		"no_memory":   sc.NoMemory,
+	}
+	if sc.Response != nil {
+		m["response"] = *sc.Response
+	}
+	if len(sc.ToolCalls) > 0 {
+		m["tool_calls"] = sc.ToolCalls
+	}
+	if len(sc.ToolResults) > 0 {
+		m["tool_results"] = sc.ToolResults
+	}
+	return m
+}
+
 //export go_invoke_stage
-func go_invoke_stage(stage *C.char, ctxJSON *C.char, errorOut **C.char) C.int {
+func go_invoke_stage(stage *C.char, ctxJSON *C.char, resultOut **C.char, errorOut **C.char) C.int {
 	goStage := C.GoString(stage)
 	handlerMu.RLock()
 	h, ok := stageHandlers[goStage]
@@ -693,25 +738,15 @@ func go_invoke_stage(stage *C.char, ctxJSON *C.char, errorOut **C.char) C.int {
 	if !ok { return 0 }
 	sc := &sdk.StageContext{}
 	if ctxJSON != nil {
-		var m map[string]interface{}
-		if err := json.Unmarshal([]byte(C.GoString(ctxJSON)), &m); err == nil {
-			if v, _ := m["raw_message"].(string); v != "" { sc.RawMessage = v }
-			if v, _ := m["user_id"].(string); v != "" { sc.UserID = v }
-			if v, _ := m["group_id"].(string); v != "" { sc.GroupID = v }
-			if v, _ := m["phase"].(string); v != "" { sc.Phase = sdk.Stage(v) }
-			if v, _ := m["llm_text"].(string); v != "" { sc.LLMText = v }
-			if v, _ := m["final_text"].(string); v != "" { sc.FinalText = v }
-			if v, _ := m["no_memory"].(bool); v { sc.NoMemory = true }
-			if v, _ := m["response"].(string); v != "" { sc.Response = &v }
-			if v, _ := m["tool_calls"].([]interface{}); len(v) > 0 {
-				b, _ := json.Marshal(v); json.Unmarshal(b, &sc.ToolCalls)
-			}
-			if v, _ := m["tool_results"].([]interface{}); len(v) > 0 {
-				b, _ := json.Marshal(v); json.Unmarshal(b, &sc.ToolResults)
-			}
-		}
+		fillStageContext(sc, C.GoString(ctxJSON))
 	}
 	if err := h(sc); err != nil { *errorOut = C.CString(err.Error()); return 1 }
+	// ABI v2: 回传插件修改后的上下文（若调用方要求）
+	if resultOut != nil {
+		if b, err := json.Marshal(stageContextWritable(sc)); err == nil {
+			*resultOut = C.CString(string(b))
+		}
+	}
 	return 0
 }
 
@@ -742,7 +777,8 @@ func main() {}
 const tmplPluginInitC = `#include <stdlib.h>
 #include <string.h>
 
-#define HOMEAGENT_ABI_VERSION 1
+// HOMEAGENT_ABI_VERSION 与 sdk/meta/meta.go CABINum 同步（major*100+minor，v0.9.x→900）
+#define HOMEAGENT_ABI_VERSION 900
 
 typedef struct {
     int version; int version_min;
@@ -750,7 +786,7 @@ typedef struct {
     int (*start_plugin)(void*, int, char**);
     int (*stop_plugin)(char**);
     int (*invoke_tool)(char*, char*, char**, char**);
-    int (*invoke_stage)(char*, char*, char**);
+    int (*invoke_stage)(char*, char*, char**, char**);
     int (*invoke_output)(char*, char*, char*, char**);
     void (*free_string)(char*);
 } PluginAPI;
@@ -765,7 +801,7 @@ extern int go_init_plugin(char*, char*, char**);
 extern int go_start_plugin(void*, int, char**);
 extern int go_stop_plugin(char**);
 extern int go_invoke_tool(char*, char*, char**, char**);
-extern int go_invoke_stage(char*, char*, char**);
+extern int go_invoke_stage(char*, char*, char**, char**);
 extern int go_invoke_output(char*, char*, char*, char**);
 extern void go_free_string(char*);
 
@@ -773,7 +809,7 @@ int c_init_plugin(char* n, char* c, char** e) { return go_init_plugin(n, c, e); 
 int c_start_plugin(void* a, int v, char** e) { return go_start_plugin(a, v, e); }
 int c_stop_plugin(char** e) { return go_stop_plugin(e); }
 int c_invoke_tool(char* n, char* a, char** r, char** e) { return go_invoke_tool(n, a, r, e); }
-int c_invoke_stage(char* s, char* c, char** e) { return go_invoke_stage(s, c, e); }
+int c_invoke_stage(char* s, char* c, char** r, char** e) { return go_invoke_stage(s, c, r, e); }
 int c_invoke_output(char* c, char* m, char* p, char** e) { return go_invoke_output(c, m, p, e); }
 void c_free_string(char* p) { go_free_string(p); }
 
