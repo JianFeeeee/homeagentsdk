@@ -308,6 +308,324 @@ enabled := sdk.AutoRestart()
 | [rss](example/rss) | Go | RSS 订阅 |
 | [sanitizer](example/sanitizer) | Go | 内容清洗/安全过滤 |
 
+## Remote Device SDK
+
+用于开发**远程设备接入适配器**的 C 语言 SDK，零外部依赖，兼容嵌入式平台。
+
+### 架构
+
+```
+┌─────────────────────────────────────────────────┐
+│            ha_remotedevice (C SDK)              │
+│  协议引擎  │  WS 帧  │  JSON  │  状态机  │ 传输抽象  │
+└──────────┬──────────────────────────────────────┘
+           │  同一份 C 代码，设备端和 App 端共用
+    ┌──────┴──────────────────┐
+    ▼                         ▼
+┌──────────────┐    ┌──────────────────────────┐
+│  ESP32 裸机   │    │  Linux 设备上的 App        │
+│  纯 C 直调     │    │  (Python ctypes / Go CGo / │
+│  简单命令处理   │    │   Node addon / C# P/Invoke) │
+└──────────────┘    └──────────────────────────┘
+```
+
+### 声明式 API 设计
+
+设备在代码中声明**自己是什么**、**能做什么**、**支持哪些命令**，每个命令对应独立处理函数，SDK 自动分发并回执结果：
+
+```c
+#include "ha_remotedevice.h"
+
+/* 声明能力 */
+const char *caps[] = {"camera", "status", NULL};
+
+/* 声明式命令处理表：每个命令绑定独立处理函数 */
+static ha_status_t handle_camerasue(const char *req_id, const char *args,
+                                    ha_cmd_result_t *result, void *userdata) {
+    (void)req_id; (void)userdata;
+    int duration = args[0] ? atoi(args) : 0;
+    // 拍照/录像...
+    result->status = 0;
+    result->output = "data:image/jpeg;base64,...";  // SDK 自动回执
+    return HA_OK;
+}
+
+ha_cmd_handler_def_t handlers[] = {
+    {.command = "shell",      .handler = handle_shell},
+    {.command = "camerasue",  .handler = handle_camerasue},
+    {.command = "screensee",  .handler = handle_screensee},
+    {.command = "speakeruse", .handler = handle_speakeruse},
+    {.command = NULL},  /* 标记结束 */
+};
+
+ha_config_t config = {
+    .transport = my_transport,     // 用户实现 4 个函数
+    .server    = "192.168.1.100:9890",
+    .token     = "my-token",
+    .device = {
+        .device_id = "esp32-cam-1",
+        .name      = "门口摄像头",
+        .kind      = "camera",
+        .caps      = caps,
+    },
+    .handlers  = handlers,   // 声明式命令处理表
+    .on_state  = my_state_handler,
+};
+
+ha_client_t *client = ha_client_new(&config);
+ha_client_start(client);
+while (1) {
+    ha_client_process(client);     // 主循环处理
+}
+```
+
+### 传输层抽象
+
+用户只需实现 4 个函数，适配不同平台：
+
+```c
+ha_transport_t my_transport = {
+    .connect = my_tcp_connect,   // 建立 TCP 连接
+    .send    = my_tcp_send,      // 发送数据
+    .recv    = my_tcp_recv,      // 接收数据（阻塞）
+    .close   = my_tcp_close,     // 关闭连接
+    .ctx     = &my_platform_ctx,
+};
+```
+
+### 支持的协议
+
+| 功能 | API |
+|------|-----|
+| WS 连接 + 握手 | `ha_client_start` 自动完成 |
+| 设备注册 (hello/bind) | 启动时自动发送 |
+| 命令接收 (shell/homeagent) | `handlers` 表声明式注册，SDK 自动分发 |
+| 命令回执 | `ha_client_send_result` |
+| 二进制分块（录像等） | `ha_client_send_data_chunked` |
+| TTS 音频接收 | `on_binary` 回调 |
+| 事件上报 | `ha_client_send_event` |
+| 状态上报 | `ha_client_send_status` |
+| 心跳保持 | 自动 ping/pong |
+
+### 使用方式
+
+通过 `plugindev` 工具链初始化项目：
+
+```bash
+plugindev init my-adapter --type remotedevice
+```
+
+生成 `main.c` + `CMakeLists.txt`，可直接编译或作为三方库引入：
+
+```cmake
+add_subdirectory(path/to/ha_remotedevice)
+target_link_libraries(my_app ha_remotedevice)
+target_include_directories(my_app PRIVATE ${HA_REMOTEDEVICE_INCLUDE_DIR})
+```
+
+### 快速接入指南
+
+以下是从零到设备成功接入 HomeAgent 的完整步骤。
+
+#### 1. 准备工作
+
+在 HomeAgent 平台上创建接入令牌：
+
+```bash
+# 在 HomeAgent 服务端创建一个设备接入令牌
+curl -X POST http://<homeagent-server>:8080/api/v1/device/token \
+  -H "Content-Type: application/json" \
+  -d '{"device_id":"esp32-cam-1","name":"门口摄像头","kind":"camera"}'
+# 返回: {"token":"ha-dev-token-xxxxx"}
+```
+
+记录下返回的 `token`，设备端配置时使用。
+
+#### 2. 实现传输层（4 个函数）
+
+根据你的平台实现 `ha_transport_t` 的 4 个函数指针。以下是几种常见场景：
+
+**场景 A：带 TCP/IP 栈的嵌入式设备（如 ESP32 + lwIP）**
+
+```c
+#include "ha_remotedevice.h"
+#include "lwip/sockets.h"
+
+static int esp_connect(void *ctx, const char *host, uint16_t port) {
+    struct sockaddr_in addr;
+    int sock = socket(AF_INET, SOCK_STREAM, 0);
+    if (sock < 0) return -1;
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
+    inet_pton(AF_INET, host, &addr.sin_addr);
+    int ret = connect(sock, (struct sockaddr *)&addr, sizeof(addr));
+    if (ret < 0) { closesocket(sock); return -1; }
+    *(int *)ctx = sock;
+    return 0;
+}
+
+static int esp_send(void *ctx, const uint8_t *data, int len) {
+    int sock = *(int *)ctx;
+    return send(sock, (const char *)data, len, 0);
+}
+
+static int esp_recv(void *ctx, uint8_t *buf, int len) {
+    int sock = *(int *)ctx;
+    return recv(sock, (char *)buf, len, 0);
+}
+
+static void esp_close(void *ctx) {
+    int sock = *(int *)ctx;
+    closesocket(sock);
+}
+
+int esp_ctx = -1;
+ha_transport_t transport = {
+    .connect = esp_connect,
+    .send    = esp_send,
+    .recv    = esp_recv,
+    .close   = esp_close,
+    .ctx     = &esp_ctx,
+};
+```
+
+**场景 B：通过串口（UART）连接透传模块**
+
+```c
+static int uart_connect(void *ctx, const char *host, uint16_t port) {
+    (void)host; (void)port;
+    // 初始化 UART，波特率 115200
+    return uart_init((uart_ctx_t *)ctx, 115200);
+}
+
+static int uart_send(void *ctx, const uint8_t *data, int len) {
+    return uart_write((uart_ctx_t *)ctx, data, len);
+}
+
+static int uart_recv(void *ctx, uint8_t *buf, int len) {
+    return uart_read((uart_ctx_t *)ctx, buf, len);
+}
+
+static void uart_close(void *ctx) {
+    uart_deinit((uart_ctx_t *)ctx);
+}
+```
+
+> 注意：UART 透传时，另一端需运行一个 TCP 桥接程序，将串口数据转发到 HomeAgent 的 WebSocket 端口。
+
+#### 3. 声明设备能力和命令处理
+
+```c
+#include "ha_remotedevice.h"
+
+/* 声明设备能力 */
+const char *caps[] = {"camera", "speaker", "status", NULL};
+
+/* 处理 camerasue 命令（拍照） */
+static ha_status_t handle_camera(const char *req_id, const char *args,
+                                 ha_cmd_result_t *result, void *userdata) {
+    (void)req_id; (void)userdata;
+    int duration = args[0] ? atoi(args) : 0;  // 参数：录像时长
+
+    // 拍照或录像，将结果填入 result
+    result->status = 0;
+    result->output = "data:image/jpeg;base64,/9j/4AAQ...";  // base64 图像数据
+    return HA_OK;
+}
+
+/* 处理 shell 命令 */
+static ha_status_t handle_shell(const char *req_id, const char *args,
+                                ha_cmd_result_t *result, void *userdata) {
+    (void)req_id; (void)userdata;
+    // 执行 shell 命令，args 为完整命令字符串
+    result->status = 0;
+    result->output = "command executed";
+    return HA_OK;
+}
+
+/* 声明式命令处理表 */
+ha_cmd_handler_def_t handlers[] = {
+    {.command = "shell",      .handler = handle_shell},
+    {.command = "camerasue",  .handler = handle_camera},
+    {.command = "screensee",  .handler = handle_camera},
+    {.command = "speakeruse", .handler = handle_speaker},
+    {.command = NULL},  /* 标记结束 */
+};
+```
+
+#### 4. 配置并启动客户端
+
+```c
+ha_config_t config = {
+    .transport = transport,                 // 传输层实现
+    .server    = "192.168.1.100:9890",      // HomeAgent 服务端地址
+    .token     = "ha-dev-token-xxxxx",      // 第 1 步获取的令牌
+    .device = {
+        .device_id = "esp32-cam-1",
+        .name      = "门口摄像头",
+        .kind      = "camera",
+        .caps      = caps,
+        .info_json = "{\"chip\":\"ESP32-S3\",\"firmware\":\"v1.0\"}",
+    },
+    .handlers  = handlers,                  // 命令处理表
+    .on_binary = on_binary_data,            // 接收 TTS 音频等二进制数据
+    .on_state  = on_state_change,           // 连接状态变化回调
+    .ping_interval = 30,                    // 心跳间隔秒数
+};
+
+ha_client_t *client = ha_client_new(&config);
+ha_status_t ret = ha_client_start(client);
+if (ret != HA_OK) {
+    printf("设备接入失败: %d\n", ret);
+    return;
+}
+
+/* 主循环 */
+while (1) {
+    ha_client_process(client);  // 处理协议帧、心跳、命令分发
+
+    /* 可选：设备主动上报事件 */
+    ha_client_send_event(client, "motion_detected",
+                         "{\"zone\":\"front_door\",\"confidence\":0.95}");
+
+    /* 可选：上报设备状态 */
+    ha_client_send_status(client, "online");
+
+    vTaskDelay(100 / portTICK_PERIOD_MS);  // 嵌入式 RTOS 风格延时
+}
+```
+
+#### 5. 验证连接
+
+在 HomeAgent 服务端检查设备是否在线：
+
+```bash
+# 查看已注册设备列表
+curl http://<homeagent-server>:8080/api/v1/device/list
+# 预期输出包含: {"device_id":"esp32-cam-1","status":"online",...}
+
+# 向设备发送命令（测试 camerasue）
+curl -X POST http://<homeagent-server>:8080/api/v1/device/esp32-cam-1/cmd \
+  -H "Content-Type: application/json" \
+  -d '{"cmd":"camerasue","args":"3"}'
+# 预期返回: {"status":"ok","result":"data:image/jpeg;base64,..."}
+```
+
+#### 6. 调试技巧
+
+| 问题 | 检查点 |
+|------|--------|
+| 连接失败 | 确认 `server` 地址和端口可通；检查 `token` 是否正确 |
+| WS 握手失败 | 确认 HomeAgent 服务端已开启 WebSocket 支持 |
+| 命令无响应 | 确认 `handlers` 表中注册了对应命令名；检查 `on_binary` 是否配置 |
+| 断线重连 | `max_reconnect` 控制重连次数，-1 为无限重连 |
+| 内存不足（嵌入式） | 定义 `HA_NO_ALLOC` 宏禁用动态内存分配 |
+
+### 位置
+
+- **SDK 源码**: `remotedevice/`
+- **plugindev 模板**: `plugindev init --type remotedevice`
+
 ## 构建与安装
 
 ### 构建

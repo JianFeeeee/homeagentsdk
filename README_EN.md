@@ -265,6 +265,305 @@ Internal plugins (platform built-in) have full SDK access including SocialAPI wr
 | [rss](example/rss) | Go | RSS subscriptions |
 | [sanitizer](example/sanitizer) | Go | Content sanitization / safety filtering |
 
+## Remote Device SDK
+
+A C language SDK for developing **remote device access adapters** with zero external dependencies, compatible with embedded platforms.
+
+### Architecture
+
+```
+┌─────────────────────────────────────────────────┐
+│            ha_remotedevice (C SDK)              │
+│  Protocol Engine │ WS Frames │ JSON │ State     │
+│  Machine │ Transport Abstraction                │
+└──────────┬──────────────────────────────────────┘
+           │  Same C code, shared by device & app
+    ┌──────┴──────────────────┐
+    ▼                         ▼
+┌──────────────┐    ┌──────────────────────────┐
+│  ESP32 Bare   │    │  Linux App                │
+│  Pure C       │    │  (Python ctypes / Go CGo /│
+│  Simple Cmd   │    │   Node addon / C# P/Invoke)│
+└──────────────┘    └──────────────────────────┘
+```
+
+### Declarative API Design
+
+The device declares **what it is** and **what it can do** in code. The SDK handles all protocol details automatically:
+
+```c
+#include "ha_remotedevice.h"
+
+/* Declare capabilities */
+const char *caps[] = {"camera", "status", NULL};
+
+ha_config_t config = {
+    .transport = my_transport,     // User implements 4 functions
+    .server    = "192.168.1.100:9890",
+    .token     = "my-token",
+    .device = {
+        .device_id = "esp32-cam-1",
+        .name      = "Front Door Camera",
+        .kind      = "camera",
+        .caps      = caps,
+    },
+    .on_cmd    = my_cmd_handler,   // Called when receiving commands
+    .on_binary = my_data_handler,  // Called on binary data (TTS audio, etc.)
+    .on_state  = my_state_handler, // Connection state changes
+};
+
+ha_client_t *client = ha_client_new(&config);
+ha_client_start(client);
+while (1) {
+    ha_client_process(client);     // Main loop processing
+}
+```
+
+### Transport Layer Abstraction
+
+Users only need to implement 4 functions to adapt to different platforms:
+
+```c
+ha_transport_t my_transport = {
+    .connect = my_tcp_connect,   // Establish TCP connection
+    .send    = my_tcp_send,      // Send data
+    .recv    = my_tcp_recv,      // Receive data (blocking)
+    .close   = my_tcp_close,     // Close connection
+    .ctx     = &my_platform_ctx,
+};
+```
+
+### Protocol Support
+
+| Feature | API |
+|---------|-----|
+| WS connection + handshake | Automatic via `ha_client_start` |
+| Device registration (hello/bind) | Automatic on startup |
+| Command receive (shell/homeagent) | `on_cmd` callback |
+| Command result | `ha_client_send_result` |
+| Binary chunked transfer (video) | `ha_client_send_data_chunked` |
+| TTS audio receive | `on_binary` callback |
+| Event reporting | `ha_client_send_event` |
+| Status reporting | `ha_client_send_status` |
+| Heartbeat keepalive | Automatic ping/pong |
+
+### Usage
+
+Initialize a project via the `plugindev` toolchain:
+
+```bash
+plugindev init my-adapter --type remotedevice
+```
+
+Generates `main.c` + `CMakeLists.txt`, can be built directly or used as a third-party library:
+
+```cmake
+add_subdirectory(path/to/ha_remotedevice)
+target_link_libraries(my_app ha_remotedevice)
+target_include_directories(my_app PRIVATE ${HA_REMOTEDEVICE_INCLUDE_DIR})
+```
+
+### Quick Start Guide
+
+A complete step-by-step guide from zero to a device successfully connected to HomeAgent.
+
+#### Step 1: Preparation
+
+Create an access token on the HomeAgent platform:
+
+```bash
+# Create a device access token on the HomeAgent server
+curl -X POST http://<homeagent-server>:8080/api/v1/device/token \
+  -H "Content-Type: application/json" \
+  -d '{"device_id":"esp32-cam-1","name":"Front Door Camera","kind":"camera"}'
+# Returns: {"token":"ha-dev-token-xxxxx"}
+```
+
+Save the returned `token` — you'll need it in the device configuration.
+
+#### Step 2: Implement the Transport Layer (4 functions)
+
+Implement the 4 function pointers of `ha_transport_t` for your platform. Here are common scenarios:
+
+**Scenario A: Embedded device with TCP/IP stack (e.g., ESP32 + lwIP)**
+
+```c
+#include "ha_remotedevice.h"
+#include "lwip/sockets.h"
+
+static int esp_connect(void *ctx, const char *host, uint16_t port) {
+    struct sockaddr_in addr;
+    int sock = socket(AF_INET, SOCK_STREAM, 0);
+    if (sock < 0) return -1;
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
+    inet_pton(AF_INET, host, &addr.sin_addr);
+    int ret = connect(sock, (struct sockaddr *)&addr, sizeof(addr));
+    if (ret < 0) { closesocket(sock); return -1; }
+    *(int *)ctx = sock;
+    return 0;
+}
+
+static int esp_send(void *ctx, const uint8_t *data, int len) {
+    int sock = *(int *)ctx;
+    return send(sock, (const char *)data, len, 0);
+}
+
+static int esp_recv(void *ctx, uint8_t *buf, int len) {
+    int sock = *(int *)ctx;
+    return recv(sock, (char *)buf, len, 0);
+}
+
+static void esp_close(void *ctx) {
+    int sock = *(int *)ctx;
+    closesocket(sock);
+}
+
+int esp_ctx = -1;
+ha_transport_t transport = {
+    .connect = esp_connect,
+    .send    = esp_send,
+    .recv    = esp_recv,
+    .close   = esp_close,
+    .ctx     = &esp_ctx,
+};
+```
+
+**Scenario B: Serial (UART) passthrough module**
+
+```c
+static int uart_connect(void *ctx, const char *host, uint16_t port) {
+    (void)host; (void)port;
+    return uart_init((uart_ctx_t *)ctx, 115200);
+}
+
+static int uart_send(void *ctx, const uint8_t *data, int len) {
+    return uart_write((uart_ctx_t *)ctx, data, len);
+}
+
+static int uart_recv(void *ctx, uint8_t *buf, int len) {
+    return uart_read((uart_ctx_t *)ctx, buf, len);
+}
+
+static void uart_close(void *ctx) {
+    uart_deinit((uart_ctx_t *)ctx);
+}
+```
+
+> Note: For UART passthrough, a TCP bridge program must run on the other end to forward serial data to the HomeAgent WebSocket port.
+
+#### Step 3: Declare Device Capabilities and Command Handlers
+
+```c
+#include "ha_remotedevice.h"
+
+/* Declare device capabilities */
+const char *caps[] = {"camera", "speaker", "status", NULL};
+
+/* Handle camerasue command (take photo) */
+static ha_status_t handle_camera(const char *req_id, const char *args,
+                                 ha_cmd_result_t *result, void *userdata) {
+    (void)req_id; (void)userdata;
+    int duration = args[0] ? atoi(args) : 0;
+
+    // Capture image, fill the result
+    result->status = 0;
+    result->output = "data:image/jpeg;base64,/9j/4AAQ...";  // base64 image data
+    return HA_OK;
+}
+
+/* Handle shell command */
+static ha_status_t handle_shell(const char *req_id, const char *args,
+                                ha_cmd_result_t *result, void *userdata) {
+    (void)req_id; (void)userdata;
+    result->status = 0;
+    result->output = "command executed";
+    return HA_OK;
+}
+
+/* Declarative command handler table */
+ha_cmd_handler_def_t handlers[] = {
+    {.command = "shell",      .handler = handle_shell},
+    {.command = "camerasue",  .handler = handle_camera},
+    {.command = "screensee",  .handler = handle_camera},
+    {.command = "speakeruse", .handler = handle_speaker},
+    {.command = NULL},  /* terminator */
+};
+```
+
+#### Step 4: Configure and Start the Client
+
+```c
+ha_config_t config = {
+    .transport = transport,                 // Transport layer implementation
+    .server    = "192.168.1.100:9890",      // HomeAgent server address
+    .token     = "ha-dev-token-xxxxx",      // Token from Step 1
+    .device = {
+        .device_id = "esp32-cam-1",
+        .name      = "Front Door Camera",
+        .kind      = "camera",
+        .caps      = caps,
+        .info_json = "{\"chip\":\"ESP32-S3\",\"firmware\":\"v1.0\"}",
+    },
+    .handlers  = handlers,                  // Command handler table
+    .on_binary = on_binary_data,            // Receive TTS audio etc.
+    .on_state  = on_state_change,           // Connection state callback
+    .ping_interval = 30,
+};
+
+ha_client_t *client = ha_client_new(&config);
+ha_status_t ret = ha_client_start(client);
+if (ret != HA_OK) {
+    printf("Device connection failed: %d\n", ret);
+    return;
+}
+
+/* Main loop */
+while (1) {
+    ha_client_process(client);  // Process protocol frames, heartbeats, commands
+
+    /* Optional: device-initiated event reporting */
+    ha_client_send_event(client, "motion_detected",
+                         "{\"zone\":\"front_door\",\"confidence\":0.95}");
+
+    /* Optional: report device status */
+    ha_client_send_status(client, "online");
+
+    vTaskDelay(100 / portTICK_PERIOD_MS);  // RTOS-style delay
+}
+```
+
+#### Step 5: Verify the Connection
+
+Check if the device is online on the HomeAgent server:
+
+```bash
+# List registered devices
+curl http://<homeagent-server>:8080/api/v1/device/list
+# Expected output includes: {"device_id":"esp32-cam-1","status":"online",...}
+
+# Send a command to the device (test camerasue)
+curl -X POST http://<homeagent-server>:8080/api/v1/device/esp32-cam-1/cmd \
+  -H "Content-Type: application/json" \
+  -d '{"cmd":"camerasue","args":"3"}'
+# Expected: {"status":"ok","result":"data:image/jpeg;base64,..."}
+```
+
+#### Step 6: Debugging Tips
+
+| Issue | Check |
+|-------|-------|
+| Connection failed | Verify `server` address and port are reachable; check `token` |
+| WS handshake failed | Verify HomeAgent server WebSocket support is enabled |
+| Command not responding | Confirm the command name is registered in `handlers` table; check `on_binary` |
+| Reconnection issues | `max_reconnect` controls retry count; -1 = infinite |
+| Low memory (embedded) | Define `HA_NO_ALLOC` to disable dynamic memory allocation |
+
+### Location
+
+- **SDK Source**: `remotedevice/`
+- **plugindev template**: `plugindev init --type remotedevice`
+
 ## Building & Installing
 
 ### Build

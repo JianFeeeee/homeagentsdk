@@ -69,17 +69,44 @@ type TemplateData struct {
 
 func cmdInit(args []string) {
 	if len(args) < 1 {
-		fmt.Println("Usage: plugindev init <name> [--lua]")
+		fmt.Println("Usage: plugindev init <name> [--lua] [--type remotedevice]")
 		os.Exit(1)
 	}
 
 	name := args[0]
 	isLua := false
+	isRemoteDevice := false
 	for _, a := range args[1:] {
 		switch a {
 		case "--lua":
 			isLua = true
+		case "--type", "-t":
+			// handled in next iteration
 		}
+	}
+	// also check --type remotedevice as a single arg
+	for i, a := range args[1:] {
+		if a == "--type" || a == "-t" {
+			if i+1 < len(args[1:]) {
+				if args[1:][i+1] == "remotedevice" {
+					isRemoteDevice = true
+				}
+			}
+		}
+		if a == "--type=remotedevice" || a == "-t=remotedevice" {
+			isRemoteDevice = true
+		}
+	}
+
+	if isRemoteDevice && isLua {
+		fmt.Println("error: --type remotedevice and --lua are mutually exclusive")
+		os.Exit(1)
+	}
+
+	// Remote device projects use different scaffold
+	if isRemoteDevice {
+		scaffoldRemoteDevice(name)
+		return
 	}
 
 	dir := name
@@ -190,6 +217,57 @@ func detectSDKInfo() (modulePath, goVersion, sdkPath, sdkVersion string) {
 	}
 	sdkVersion = readMetaVersion(root)
 	return modulePath, goVersion, root, sdkVersion
+}
+
+// scaffoldRemoteDevice 创建远程设备适配器项目脚手架
+func scaffoldRemoteDevice(name string) {
+	dir := name
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		fmt.Printf("error: directory %q already exists\n", dir)
+		os.Exit(1)
+	}
+
+	nameEn := strings.Title(strings.ReplaceAll(name, "-", " "))
+
+	data := TemplateData{
+		Plg: PlgConfig{
+			Name:        name,
+			NameZh:      "中文名",
+			NameEn:      nameEn,
+			Version:     "0.1.0",
+			Description: name + " remote device adapter",
+			Author:      "HomeAgent",
+			Entry:       name,
+			Tags:        []string{name, "remotedevice"},
+		},
+	}
+
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		fmt.Printf("error: create dir: %v\n", err)
+		os.Exit(1)
+	}
+
+	// 写入 main.c
+	writeTemplate(filepath.Join(dir, "main.c"), tmplRemoteDeviceMain, data)
+
+	// 写入 CMakeLists.txt
+	writeTemplate(filepath.Join(dir, "CMakeLists.txt"), tmplRemoteDeviceCMake, data)
+
+	// 创建 SDK 目录（symlink/copy）
+	sdkSrc := filepath.Join("..", "remotedevice")
+	sdkDst := filepath.Join(dir, "ha_remotedevice")
+	if _, err := os.Stat(sdkDst); os.IsNotExist(err) {
+		// 尝试创建符号链接，失败则提示
+		if err := os.Symlink(sdkSrc, sdkDst); err != nil {
+			fmt.Printf("  note: could not create symlink to SDK, copy manually:\n")
+			fmt.Printf("    cp -r %s %s\n", sdkSrc, sdkDst)
+		}
+	}
+
+	fmt.Printf("Created remote device adapter project %q\n", dir)
+	fmt.Printf("  cd %s && mkdir build && cd build && cmake .. && make\n", dir)
+	fmt.Printf("  Or include as subdirectory in your project:\n")
+	fmt.Printf("    add_subdirectory(%s)\n", dir)
 }
 
 func writeTemplate(path, content string, data TemplateData) {

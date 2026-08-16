@@ -1,6 +1,8 @@
 # Build artifacts
 *.so
 *.dll
+*.o
+*.exe
 *.hmap
 plugin.json
 

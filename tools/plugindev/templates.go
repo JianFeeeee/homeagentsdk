@@ -405,6 +405,10 @@ enum {
     CORE_SETTINGS_DUMP         = 44,
     CORE_SETTINGS_PLUGINS      = 45,
     CORE_REGISTER_INPUT_CH     = 46,
+    CORE_INJECT_INPUT_SYNC     = 47,
+    CORE_PLUGIN_RELOAD_ONE     = 48,
+    CORE_PLUGIN_LIST_LOADED    = 49,
+    CORE_PLUGIN_IS_DISABLED    = 50,
 };
 
 #ifdef __cplusplus
@@ -519,6 +523,7 @@ func buildPluginSDK(name string) *sdk.PluginSDK {
 	base.SetLLMAPI(dispatchLLM{})
 	base.SetSocialAPI(dispatchSocial{})
 	base.SetTextMemoryAPI(dispatchTextMemory{})
+	base.SetPluginMgrAPI(dispatchPluginMgr{})
 	base.SetInputChannelRegistrar(
 		func(name string, def sdk.ChannelDef) error {
 			defJSON, _ := json.Marshal(def)
@@ -576,6 +581,31 @@ func (dispatchSocial) ListPersons() ([]string, error) { r, e := callString(40, "
 
 type dispatchTextMemory struct{}
 func (dispatchTextMemory) Append(evt sdk.TextEvent) error { b, _ := json.Marshal(evt); return callVoid(41, string(b), "", "", 0, 0) }
+
+// ---- dispatchPluginMgr (CORE_PLUGIN_RELOAD_ONE = 48) ----
+
+type dispatchPluginMgr struct{}
+
+func (dispatchPluginMgr) ReloadOne(name string) error {
+	return callVoid(48, name, "", "", 0, 0)
+}
+
+func (dispatchPluginMgr) ListLoadedPlugins() []string {
+	r, e := callString(49, "", "", "", 0, 0)
+	if e != nil || r == "" {
+		return nil
+	}
+	var list []string
+	if json.Unmarshal([]byte(r), &list) != nil {
+		return nil
+	}
+	return list
+}
+
+func (dispatchPluginMgr) IsPluginDisabled(name string) bool {
+	r, e := callString(50, name, "", "", 0, 0)
+	return e == nil && r == "1"
+}
 
 // ---- dispatchSettings (inline) ----
 
@@ -829,6 +859,353 @@ PluginAPI* plugin_init(void) {
     api.free_string = c_free_string;
     return &api;
 }
+`
+
+// ============================================================
+// Remote Device Adapter Templates
+// ============================================================
+
+const tmplRemoteDeviceMain = `#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+
+#include "ha_remotedevice.h"
+
+/* ============================================================
+ *  {{.Plg.Name}} — Remote Device Adapter
+ *
+ *  声明式远程设备接入示例。
+ *  用户只需实现：
+ *    1. ha_transport_t 的 4 个函数
+ *    2. 声明 handlers 表（设备支持哪些命令 + 对应的处理函数）
+ *  其余协议细节（WS 握手、hello/bind、心跳、重连、命令分发、结果回执）由 SDK 自动处理。
+ * ============================================================ */
+
+/* ====================== 传输层实现 ======================
+ *
+ * 请为你的平台实现以下 4 个函数：
+ *   connect(ctx, host, port) — 建立 TCP 连接
+ *   send(ctx, data, len)     — 发送数据
+ *   recv(ctx, buf, len)      — 接收数据（阻塞，返回实际接收字节数）
+ *   close(ctx)               — 关闭连接
+ *
+ * 示例：POSIX socket 实现
+ */
+
+#if defined(_WIN32) || defined(_WIN64)
+/* Windows 平台需包含 winsock2.h */
+#error "Please implement transport for your platform (see example below)"
+#else
+/* POSIX (Linux, macOS, ESP-IDF, Zephyr, etc.) */
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <netdb.h>
+#include <unistd.h>
+
+struct transport_ctx {
+    int sock;
+};
+
+static int transport_connect(void *ctx, const char *host, uint16_t port) {
+    struct transport_ctx *tc = (struct transport_ctx *)ctx;
+    struct hostent *he = gethostbyname(host);
+    if (!he) return -1;
+    tc->sock = socket(AF_INET, SOCK_STREAM, 0);
+    if (tc->sock < 0) return -1;
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
+    memcpy(&addr.sin_addr, he->h_addr_list[0], he->h_length);
+    if (connect(tc->sock, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+        close(tc->sock);
+        tc->sock = -1;
+        return -1;
+    }
+    return 0;
+}
+
+static int transport_send(void *ctx, const uint8_t *data, int len) {
+    struct transport_ctx *tc = (struct transport_ctx *)ctx;
+    int sent = 0;
+    while (sent < len) {
+        int n = (int)send(tc->sock, data + sent, len - sent, 0);
+        if (n <= 0) return -1;
+        sent += n;
+    }
+    return sent;
+}
+
+static int transport_recv(void *ctx, uint8_t *buf, int len) {
+    struct transport_ctx *tc = (struct transport_ctx *)ctx;
+    int n = (int)recv(tc->sock, buf, len, 0);
+    return n;
+}
+
+static void transport_close(void *ctx) {
+    struct transport_ctx *tc = (struct transport_ctx *)ctx;
+    if (tc->sock >= 0) {
+        close(tc->sock);
+        tc->sock = -1;
+    }
+}
+#endif
+
+/* ====================== 声明式命令处理 ======================
+ *
+ * 每个命令对应一个处理函数，通过填写 ha_cmd_result_t 返回数据。
+ * SDK 自动回执结果，无需手动调用 send_result。
+ *
+ * 返回方式：
+ *   1. 文本输出：填写 result->output
+ *   2. 二进制数据：设置 result->has_binary=1 并填写 binary_data/len/mime
+ *   3. 错误：设置 result->status=1 并填写 result->error
+ *   4. 返回 HA_OK 表示处理成功，其他值表示处理失败
+ */
+
+/* ESP32-CAM 摄像头处理 */
+static ha_status_t handle_camerasue(const char *req_id, const char *args,
+                                    ha_cmd_result_t *result, void *userdata) {
+    (void)req_id; (void)userdata;
+    int duration = 0;
+    if (args && args[0]) duration = atoi(args);
+    printf("[camera] %s (duration=%ds)\n", duration ? "record" : "snapshot", duration);
+
+    /* 返回文本结果（base64 图片） */
+    result->status = 0;
+    result->output = "data:image/jpeg;base64,/9j/4AAQ...";
+    return HA_OK;
+}
+
+/* 屏幕截图处理 */
+static ha_status_t handle_screensee(const char *req_id, const char *args,
+                                    ha_cmd_result_t *result, void *userdata) {
+    (void)req_id; (void)args; (void)userdata;
+    printf("[screen] screenshot\n");
+    result->status = 0;
+    result->output = "data:image/png;base64,iVBORw0KGgo...";
+    return HA_OK;
+}
+
+/* 语音播报处理 */
+static ha_status_t handle_speakeruse(const char *req_id, const char *args,
+                                     ha_cmd_result_t *result, void *userdata) {
+    (void)req_id; (void)userdata;
+    printf("[speaker] TTS: %s\n", args ? args : "");
+    result->status = 0;
+    result->output = "speakeruse done";
+    return HA_OK;
+}
+
+/* 远程操控处理（computeruse） */
+static ha_status_t handle_computeruse(const char *req_id, const char *args,
+                                      ha_cmd_result_t *result, void *userdata) {
+    (void)req_id; (void)userdata;
+    const char *action = NULL;
+    const char *json_str = NULL;
+    ha_cmd_parse_json(args, &action, &json_str);
+    printf("[computeruse] action=%s\n", action ? action : "unknown");
+    result->status = 0;
+    result->output = "computeruse done";
+    return HA_OK;
+}
+
+/* 剪贴板读取 */
+static ha_status_t handle_clipboardsee(const char *req_id, const char *args,
+                                       ha_cmd_result_t *result, void *userdata) {
+    (void)req_id; (void)args; (void)userdata;
+    result->status = 0;
+    result->output = "clipboard content";
+    return HA_OK;
+}
+
+/* 剪贴板写入 */
+static ha_status_t handle_clipboardsue(const char *req_id, const char *args,
+                                       ha_cmd_result_t *result, void *userdata) {
+    (void)req_id; (void)userdata;
+    printf("[clipboard] write: %s\n", args ? args : "");
+    result->status = 0;
+    result->output = "clipboard written";
+    return HA_OK;
+}
+
+/* 屏幕显示 */
+static ha_status_t handle_screensue(const char *req_id, const char *args,
+                                    ha_cmd_result_t *result, void *userdata) {
+    (void)req_id; (void)userdata;
+    printf("[screensue] show: %s\n", args ? args : "");
+    result->status = 0;
+    result->output = "screensue shown";
+    return HA_OK;
+}
+
+/* Shell 命令处理 */
+static ha_status_t handle_shell(const char *req_id, const char *args,
+                                ha_cmd_result_t *result, void *userdata) {
+    (void)req_id; (void)userdata;
+    printf("[shell] cmd: %s\n", args ? args : "");
+    result->status = 0;
+    result->output = "shell output";
+    return HA_OK;
+}
+
+/* 设备信息查询 */
+static ha_status_t handle_deviceinfo(const char *req_id, const char *args,
+                                     ha_cmd_result_t *result, void *userdata) {
+    (void)req_id; (void)args; (void)userdata;
+    result->status = 0;
+    result->output = "{\"platform\":\"linux\",\"arch\":\"x86_64\"}";
+    return HA_OK;
+}
+
+/* ====================== 连接状态回调 ====================== */
+
+static void on_state(int connected, void *userdata) {
+    (void)userdata;
+    printf("[devicelink] state: %s\n", connected ? "connected" : "disconnected");
+}
+
+/* ====================== 主函数 ====================== */
+
+int main(int argc, char *argv[]) {
+    /* 传输层上下文 */
+    struct transport_ctx tctx;
+    tctx.sock = -1;
+
+    ha_transport_t transport = {
+        .connect = transport_connect,
+        .send    = transport_send,
+        .recv    = transport_recv,
+        .close   = transport_close,
+        .ctx     = &tctx,
+    };
+
+    /* ===== 声明式设备配置 ===== */
+
+    /* 声明设备能力 */
+    const char *caps[] = {
+        "status", "cmdrun", "deviceinfo",
+        "camerasue", "screensee", "speakeruse",
+        "computeruse", "clipboardsee", "clipboardsue",
+        "screensue",
+        NULL
+    };
+
+    /* 声明命令处理表：设备支持哪些命令，以及对应的处理函数 */
+    ha_cmd_handler_def_t handlers[] = {
+        {.command = "shell",        .handler = handle_shell},
+        {.command = "camerasue",    .handler = handle_camerasue},
+        {.command = "screensee",    .handler = handle_screensee},
+        {.command = "speakeruse",   .handler = handle_speakeruse},
+        {.command = "computeruse",  .handler = handle_computeruse},
+        {.command = "clipboardsee", .handler = handle_clipboardsee},
+        {.command = "clipboardsue", .handler = handle_clipboardsue},
+        {.command = "screensue",    .handler = handle_screensue},
+        {.command = "deviceinfo",   .handler = handle_deviceinfo},
+        {.command = NULL},  /* 标记结束 */
+    };
+
+    ha_config_t config = {
+        .transport = transport,
+        .server    = "127.0.0.1:9890",
+        .token     = "your-token-here",
+        .device = {
+            .device_id = "{{.Plg.Name}}",
+            .name      = "{{.Plg.NameEn}}",
+            .kind      = "computer",
+            .caps      = caps,
+            .info_json = "{\"platform\":\"linux\",\"arch\":\"x86_64\"}",
+        },
+        .handlers  = handlers,   /* 声明式命令处理表 */
+        .on_state  = on_state,
+        .ping_interval = 30,
+    };
+
+    ha_client_t *client = ha_client_new(&config);
+    if (!client) {
+        fprintf(stderr, "Failed to create client\n");
+        return 1;
+    }
+
+    printf("Starting remote device adapter: {{.Plg.Name}}\n");
+    printf("  Server: %s\n", config.server);
+    printf("  Device ID: %s\n", config.device.device_id);
+    printf("  Kind: %s\n", config.device.kind);
+    printf("  Caps: ");
+    for (const char **p = caps; *p; p++) printf("%s ", *p);
+    printf("\n");
+
+    ha_status_t st = ha_client_start(client);
+    if (st != HA_OK) {
+        fprintf(stderr, "Failed to connect: %d\n", st);
+        ha_client_destroy(client);
+        return 1;
+    }
+
+    printf("Connected! Entering main loop...\n");
+
+    /* 主循环 */
+    while (1) {
+        ha_status_t st = ha_client_process(client);
+        if (st == HA_ERR_DISCONNECTED) {
+            printf("Disconnected, exiting.\n");
+            break;
+        }
+#if defined(_WIN32) || defined(_WIN64)
+        Sleep(10);
+#else
+        usleep(10000);
+#endif
+    }
+
+    ha_client_stop(client);
+    ha_client_destroy(client);
+    return 0;
+}
+`
+
+const tmplRemoteDeviceCMake = `cmake_minimum_required(VERSION 3.10)
+project({{.Plg.Name}} VERSION 0.1.0 LANGUAGES C)
+
+# ============================================================
+# {{.Plg.Name}} — Remote Device Adapter
+# ============================================================
+
+# 设置 SDK 路径（默认使用内置 SDK，也可通过 -DSDK_PATH=... 指定）
+set(SDK_PATH "${CMAKE_CURRENT_SOURCE_DIR}/ha_remotedevice"
+    CACHE PATH "Path to ha_remotedevice SDK")
+
+# 添加 SDK 子目录
+if(EXISTS "${SDK_PATH}/CMakeLists.txt")
+    add_subdirectory(${SDK_PATH} ha_remotedevice)
+else()
+    message(FATAL_ERROR "ha_remotedevice SDK not found at ${SDK_PATH}")
+endif()
+
+# 创建设备适配器可执行文件
+add_executable(${PROJECT_NAME}
+    main.c
+)
+
+# 链接 SDK
+target_link_libraries(${PROJECT_NAME} PRIVATE ha_remotedevice)
+
+# 包含 SDK 头文件
+target_include_directories(${PROJECT_NAME} PRIVATE
+    ${HA_REMOTEDEVICE_INCLUDE_DIR}
+)
+
+# 编译选项
+if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(${PROJECT_NAME} PRIVATE
+        -Wall -Wextra -Wpedantic
+        -Wno-unused-parameter
+    )
+endif()
+
+# 安装
+install(TARGETS ${PROJECT_NAME} RUNTIME DESTINATION bin)
 `
 
 const tmplReadme = `# {{.Plg.Name}}
