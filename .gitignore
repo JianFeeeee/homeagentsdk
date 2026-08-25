@@ -30,3 +30,4 @@ z_entry.c
 
 # plugindev binary in tools/
 tools/plugindev/plugindev
+example/recoverydiag/
