@@ -34,7 +34,12 @@ type Plugin struct {
 type sessionState struct {
 	ID       string
 	Replying []map[string]interface{}
+	History  []string // 轮次历史 [user, agent, user, agent...]，延续上下文用
+	LastUsed time.Time
 }
+
+// maxSessionTurns 单会话保留的最大轮次对数。
+const maxSessionTurns = 10
 
 func (p *Plugin) Name() string { return p.name }
 
@@ -43,6 +48,14 @@ func (p *Plugin) Start(s *sdk.PluginSDK) error {
 	p.sdk = s
 	p.sessions = make(map[string]*sessionState)
 	tp := p.name + "_"
+
+	// 注册自身为输出通道：agent 回复 emit 到本通道时有落点。
+	// （回复主要走同步注入返回，此通道用于 agent 主动 output_send__acp）
+	s.RegisterOutputChannel(p.name, 1, "ACP Agent 互联通道（外部 agent 会话的回复由此返回）", sdk.ChannelDef{}, func(args map[string]interface{}) (interface{}, error) {
+		payload, _ := args["payload"].(string)
+		log.Printf("[%s] channel output: %s", p.name, truncateStr(payload, 120))
+		return map[string]interface{}{"status": "ok"}, nil
+	})
 
 	s.Settings().RegisterDef(sdk.ConfigDef{
 		Key: "listen", Default: "127.0.0.1:12001",
@@ -190,21 +203,56 @@ func (p *Plugin) handleSessionPost(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		sid := fmt.Sprintf("session_%d", time.Now().UnixNano())
+		// 会话：调用方可指定 session_id 延续多轮；不指定则新建。
+		sid := strings.TrimSpace(req.Params.SessionID)
 		p.mu.Lock()
-		p.sessions[sid] = &sessionState{ID: sid}
+		if sid != "" {
+			if _, exists := p.sessions[sid]; !exists {
+				p.sessions[sid] = &sessionState{ID: sid, LastUsed: time.Now()}
+			}
+		} else {
+			sid = fmt.Sprintf("session_%d", time.Now().UnixNano())
+			p.sessions[sid] = &sessionState{ID: sid, LastUsed: time.Now()}
+		}
+		st := p.sessions[sid]
 		p.mu.Unlock()
 
-		if p.sdk != nil {
-			p.sdk.InjectInterruptText(p.name, "acp",
-				fmt.Sprintf("[来自ACP Agent的请求请求 session %s]\n%s", sid, text))
+		// 延续上下文
+		injectText := text
+		p.mu.Lock()
+		if len(st.History) > 0 {
+			ctxText := strings.Join(st.History, "\n")
+			injectText = "[对话上下文]\n" + ctxText + "\n[本轮输入]\n" + text
 		}
+		p.mu.Unlock()
+
+		// 同步注入等待回复：不抢占打断，完整闭环返回文本。
+		reply := ""
+		if p.sdk != nil {
+			reply = p.sdk.InjectInputSync(p.name, p.name,
+				fmt.Sprintf("[来自ACP Agent的请求 session %s]\n%s\n[注意] 请直接以文本回复本请求，不要调用 output_send__%s——你的最终文本回复会被系统自动返回给请求方。", sid, injectText, p.name))
+		}
+
+		// 写回历史 + 填充 Replying 供 SSE 消费
+		p.mu.Lock()
+		st.History = append(st.History, "用户: "+text, "助手: "+reply)
+		if len(st.History) > maxSessionTurns*2 {
+			st.History = st.History[len(st.History)-maxSessionTurns*2:]
+		}
+		st.LastUsed = time.Now()
+		if reply != "" {
+			st.Replying = append(st.Replying, map[string]interface{}{
+				"type": "reply", "text": reply,
+			})
+		}
+		p.mu.Unlock()
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"jsonrpc": "2.0", "id": req.ID,
 			"result": map[string]interface{}{
 				"session": map[string]interface{}{"id": sid},
+				"reply":   reply,
 			},
 		})
 
@@ -212,12 +260,17 @@ func (p *Plugin) handleSessionPost(w http.ResponseWriter, r *http.Request) {
 		sid := req.Params.SessionID
 		p.mu.Lock()
 		st := p.sessions[sid]
-		if st != nil && req.Params.Final {
-			st.Replying = append(st.Replying, map[string]interface{}{
-				"type": "reply", "text": "done",
-			})
-		}
 		p.mu.Unlock()
+		if st == nil {
+			http.Error(w, "session not found", http.StatusNotFound)
+			return
+		}
+		if req.Params.Final {
+			// 客户端结束会话：标记并保留历史（后续可再 session/new 续）
+			p.mu.Lock()
+			st.LastUsed = time.Now()
+			p.mu.Unlock()
+		}
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{
