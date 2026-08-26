@@ -647,6 +647,9 @@ func (d *dispatchSettings) Dump() map[string]interface{} {
 func (d *dispatchSettings) Plugins() []string {
 	r, e := callString(45, "", "", "", 0, 0); if e != nil || r == "" { return nil }; var v []string; json.Unmarshal([]byte(r), &v); return v
 }
+func (d *dispatchSettings) DataDir() string {
+	r, e := callString(51, "", "", "", 0, 0); if e != nil { return "" }; return r
+}
 
 // ---- Go callbacks (called from z_entry.c via C) ----
 
