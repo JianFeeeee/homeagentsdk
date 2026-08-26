@@ -107,6 +107,14 @@ func (p *Plugin) handleBiliVideo(args map[string]interface{}) (interface{}, erro
 			}
 		}
 	}
+	// 安全校验：output_dir 是配置项，但避免被配成系统目录导致 yt-dlp 任意位置写。
+	// 禁止根/家目录本身，且规范化后必须落在明确子目录内。
+	outputDir = filepath.Clean(outputDir)
+	for _, forbidden := range []string{"/", "/etc", "/usr", "/bin", "/sbin", "/boot", "/dev", "/proc", "/sys", "/var"} {
+		if outputDir == forbidden {
+			return nil, fmt.Errorf("output_dir 不能是系统目录 %s", forbidden)
+		}
+	}
 	os.MkdirAll(outputDir, 0755)
 
 	var out bytes.Buffer

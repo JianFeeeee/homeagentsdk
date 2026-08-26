@@ -137,7 +137,12 @@ func (p *Plugin) startServer(addr string) error {
 		return fmt.Errorf("listen %s: %v", addr, err)
 	}
 
-	srv := &http.Server{Handler: mux}
+	srv := &http.Server{
+		Handler:      mux,
+		ReadTimeout:  30 * time.Second,
+		WriteTimeout: 120 * time.Second,
+		IdleTimeout:  60 * time.Second,
+	}
 	addrStr := listener.Addr().String()
 
 	p.srvMu.Lock()

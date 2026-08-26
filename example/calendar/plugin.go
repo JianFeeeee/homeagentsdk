@@ -656,7 +656,7 @@ func (p *Plugin) saveEventsLocked() {
 		NextEventID: p.nextEventID,
 	}
 	b, _ := json.MarshalIndent(data, "", "  ")
-	os.WriteFile(p.eventsFile(), b, 0644)
+	atomicWriteJSON(p.eventsFile(), b)
 }
 
 // --- Helper: parse remind_before ---
@@ -1176,4 +1176,13 @@ func (p *Plugin) handleSearch(args map[string]interface{}) (interface{}, error) 
 		lines = append(lines, fmt.Sprintf("  [%s] %s (ID: %s)", e.StartTime, e.Title, e.ID))
 	}
 	return map[string]interface{}{"content": strings.Join(lines, "\n")}, nil
+}
+
+// atomicWriteJSON 原子写 JSON：先写临时文件再 rename，避免进程崩溃截断数据文件。
+func atomicWriteJSON(path string, data []byte) error {
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
 }

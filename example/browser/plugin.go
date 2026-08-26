@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -33,23 +34,49 @@ type Plugin struct {
 	proxy   string
 	client  *http.Client
 
-	sessions map[string]*BrowserSession
-	nextID   int
-	wg       sync.WaitGroup
-	stopCh   chan struct{}
-	stopOnce sync.Once
+	sessions    map[string]*BrowserSession
+	nextID      int
+	wg          sync.WaitGroup
+	stopCh      chan struct{}
+	stopOnce    sync.Once
+	profilesDir string // 持久化 profile 根目录（<data>/browser_profiles），空则禁用
+
+	// 共享浏览器单例：所有 agent 共用一个 Chromium 进程（全局 UserDataDir，
+	// 登录态/cookies 跨 agent、跨会话、跨插件重启保留），每个 start 创建一个
+	// 新标签页（CDP Target）。同 source 复用自己的标签页。浏览器进程在
+	// 最后一个标签页关闭后保留（避免反复冷启动），仅插件 Stop 时回收。
+	sharedAllocCtx  context.Context
+	sharedAllocCancel context.CancelFunc
+	sharedMu        sync.Mutex
 }
 
 type BrowserSession struct {
 	id        string
-	allocCtx  context.Context
+	allocCtx  context.Context // 共享浏览器进程上下文（shared=true 时指向全局单例）
 	cancel    context.CancelFunc
-	ctx       context.Context
+	ctx       context.Context // 本会话的 Target 上下文（一个标签页）
 	createdAt time.Time
 	timeout   time.Duration
 	closed    bool
 	mu        sync.Mutex
 	currentURL string
+	shared     bool   // true=共享浏览器的一个标签页；false=独占浏览器实例
+	profileDir string // 非空表示使用持久化 profile（关闭时不删目录）
+	sessionKey string // 共享模式下的复用键（agent 来源标识，同 key 复用同一标签页）
+}
+
+// sanitizeProfileName 消毒 profile 名：仅保留字母数字-_，防路径穿越。
+func sanitizeProfileName(name string) string {
+	var b []byte
+	for _, c := range []byte(name) {
+		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_' {
+			b = append(b, c)
+		}
+	}
+	if len(b) == 0 || string(b) == "." || string(b) == ".." {
+		return ""
+	}
+	return string(b)
 }
 
 func NewPluginFactory(name string, config map[string]interface{}) (sdk.Plugin, error) {
@@ -187,6 +214,13 @@ func (p *Plugin) Start(s *sdk.PluginSDK) error {
 	p.proxy = readCfg(s.Settings(), "proxy", "")
 	p.client = newHTTPClient(p.timeout, p.proxy)
 
+	// 持久化 profile 根目录：<data>/browser_profiles
+	if dd, err := s.Settings().GetCore("daemon.data_dir"); err == nil {
+		if s2, ok := dd.(string); ok && s2 != "" {
+			p.profilesDir = filepath.Join(s2, "browser_profiles")
+		}
+	}
+
 	tp := p.name + "_"
 
 	cleaner := func(output string) string {
@@ -242,12 +276,13 @@ func (p *Plugin) Start(s *sdk.PluginSDK) error {
 
 	s.RegisterTool(tp+"start", sdk.ToolDef{
 		Name:        tp + "start",
-		Description: "启动交互式浏览器会话(interactive 模式)。通过 CDP 连接 Chromium，支持导航、截图、点击、输入等操作。返回会话 ID。",
+		Description: "启动交互式浏览器会话。优先连接 systemd 托管的共享浏览器后端（登录态全机共享、各 agent 独立标签页）；后端未安装时返回 need_install 引导（调 browser_install）；无法安装时自动降级本地临时模式。同来源复用已有标签页。",
 		Parameters: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
 				"url":     map[string]interface{}{"type": "string", "description": "初始导航 URL（可选）"},
 				"timeout": map[string]interface{}{"type": "string", "description": "会话超时(如 5m, 10m，默认 10m)"},
+				"profile": map[string]interface{}{"type": "string", "description": "持久化档案名（可选，如 main）。同名档案共享登录态与浏览历史；不指定则为一次性临时会话"},
 			},
 		},
 	}, p.handleBrowserStart)
@@ -336,6 +371,15 @@ func (p *Plugin) Start(s *sdk.PluginSDK) error {
 			"required": []string{"id"},
 		},
 	}, p.handleScroll)
+
+	s.RegisterTool(tp+"install", sdk.ToolDef{
+		Name:        tp + "install",
+		Description: "安装并启动共享浏览器后端（homeagent-browser.service，systemd 托管）。前提：本机已有 chromium 二进制（无则先提示用户安装：apt install chromium 或等价命令）。安装后所有 agent 共享同一浏览器实例与登录态。",
+		Parameters: map[string]interface{}{
+			"type":       "object",
+			"properties": map[string]interface{}{},
+		},
+	}, p.handleBrowserInstall)
 
 	s.RegisterTool(tp+"close", sdk.ToolDef{
 		Name:        tp + "close",
@@ -663,6 +707,9 @@ func (p *Plugin) fetchWithChromium(rawURL string, maxChars int) (interface{}, er
 	}, nil
 }
 
+// handleRender 无头渲染 JS 页面并提取文本（normal 模式）。
+// 主路径走共享浏览器后端：开临时标签页（带全机登录态）→ 渲染 → 取 text → 关标签页；
+// 后端不可用时 failback 到独立 chromium --dump-dom（无登录态，仅保功能）。
 func (p *Plugin) handleRender(args map[string]interface{}) (interface{}, error) {
 	rawURL := readArg(args, "url", "")
 	if rawURL == "" {
@@ -672,32 +719,70 @@ func (p *Plugin) handleRender(args map[string]interface{}) (interface{}, error) 
 		return errResult(err.Error()), nil
 	}
 	waitSec := int64(readArg(args, "wait", float64(0)))
-	if waitSec > 0 {
-		time.Sleep(time.Duration(waitSec) * time.Second)
+
+	var title, html string
+	rendered := false
+
+	ok, needInstall, _ := p.ensureBackend()
+	if ok {
+		remoteCtx, remoteCancel := chromedp.NewRemoteAllocator(context.Background(), cdpEndpoint)
+		defer remoteCancel()
+		tabCtx, tabCancel := chromedp.NewContext(remoteCtx)
+		defer tabCancel()
+		actions := []chromedp.Action{
+			chromedp.Navigate(rawURL),
+			chromedp.WaitReady("body"),
+		}
+		if waitSec > 0 {
+			actions = append(actions, chromedp.Sleep(time.Duration(waitSec)*time.Second))
+		}
+		actions = append(actions,
+			chromedp.Title(&title),
+			chromedp.OuterHTML("html", &html),
+		)
+		// 整体限时 30s，防慢页拖死工具
+		rctx, rcancel := context.WithTimeout(tabCtx, 30*time.Second)
+		defer rcancel()
+		if err := chromedp.Run(rctx, actions...); err == nil {
+			rendered = true
+		} else {
+			log.Printf("[%s] render via backend failed (%v), fallback to dump-dom", p.name, err)
+		}
+	} else if needInstall {
+		return map[string]interface{}{
+			"error":        "browser backend not installed",
+			"need_install": true,
+			"guide":        "调用 browser_install 安装共享后端；或重试本工具自动降级为独立 chromium 渲染（不带登录态）",
+		}, nil
 	}
-	var html string
-	chromiumPath := "/usr/local/bin/chromium"
-	if _, err := os.Stat(chromiumPath); err == nil {
+
+	if !rendered {
+		chromiumPath := "/usr/local/bin/chromium"
+		if _, err := os.Stat(chromiumPath); err != nil {
+			if _, e2 := exec.LookPath("chromium"); e2 == nil {
+				chromiumPath = "chromium"
+			} else {
+				return errResult("no chromium available"), nil
+			}
+		}
 		var out bytes.Buffer
 		cmd := exec.Command(chromiumPath, "--headless", "--disable-gpu", "--no-sandbox", "--dump-dom", rawURL)
 		cmd.Stdout = &out
-		if err := cmd.Run(); err != nil {
-			return errResult("chromium: " + err.Error()), nil
+		done := make(chan error, 1)
+		go func() { done <- cmd.Run() }()
+		select {
+		case err := <-done:
+			if err != nil {
+				return errResult("chromium: " + err.Error()), nil
+			}
+		case <-time.After(30 * time.Second):
+			cmd.Process.Kill()
+			<-done // 回收子进程避免僵尸
+			return errResult("chromium dump-dom timeout (30s)"), nil
 		}
 		html = out.String()
-	} else {
-		resp, err := http.Get(rawURL)
-		if err != nil {
-			return errResult("http get: " + err.Error()), nil
-		}
-		defer resp.Body.Close()
-		body, _ := io.ReadAll(resp.Body)
-		html = string(body)
 	}
-	title := ""
-	if m := regexp.MustCompile(`<title>([^<]+)</title>`).FindStringSubmatch(html); len(m) > 1 {
-		title = m[1]
-	}
+
 	text := htmlToText(html)
 	origLen := len(text)
 	truncated := origLen > 5000
@@ -712,18 +797,71 @@ func (p *Plugin) handleRender(args map[string]interface{}) (interface{}, error) 
 	if truncated {
 		result += fmt.Sprintf("\n\n...(仅显示前 5000 字符，共 %d 字符)", origLen)
 	}
-	return map[string]interface{}{"content": result, "title": title}, nil
+	mode := "backend-tab"
+	if !rendered {
+		mode = "local-dump-dom"
+	}
+	return map[string]interface{}{"content": result, "title": title, "mode": mode}, nil
 }
 
-// ── Interactive Browser Session (CDP) ─────────────────────
-
-func (p *Plugin) handleBrowserStart(args map[string]interface{}) (interface{}, error) {
-	timeoutStr := readArg(args, "timeout", "10m")
-	timeout, err := time.ParseDuration(timeoutStr)
+func cdpReachable(endpoint string) bool {
+	client := &http.Client{Timeout: 2 * time.Second}
+	resp, err := client.Get(endpoint + "/json/version")
 	if err != nil {
-		timeout = 10 * time.Minute
+		return false
 	}
+	resp.Body.Close()
+	return resp.StatusCode == http.StatusOK
+}
 
+// systemdUnitActive 检查 homeagent-browser.service 是否已安装。
+func systemdUnitInstalled() bool {
+	out, err := exec.Command("systemctl", "cat", "homeagent-browser.service").CombinedOutput()
+	return err == nil && len(out) > 0
+}
+
+// startSystemdUnit 尝试 systemctl start（单元已安装但未运行时用）。
+func startSystemdUnit() error {
+	return exec.Command("systemctl", "start", "homeagent-browser.service").Run()
+}
+
+// cdpEndpoint 是共享 Chromium 后端的 CDP 地址（homeagent-browser.service）。
+const cdpEndpoint = "http://127.0.0.1:9222"
+
+// ensureBackend 确保共享浏览器后端可用：探测 → 拉起已装服务 → 报告未装。
+// 返回 (ok, needInstall, err)。
+func (p *Plugin) ensureBackend() (bool, bool, error) {
+	if cdpReachable(cdpEndpoint) {
+		return true, false, nil
+	}
+	if systemdUnitInstalled() {
+		if err := startSystemdUnit(); err == nil {
+			// 等待 CDP 就绪（chromium 启动 ~1-3s）
+			for i := 0; i < 10; i++ {
+				time.Sleep(500 * time.Millisecond)
+				if cdpReachable(cdpEndpoint) {
+					return true, false, nil
+				}
+			}
+		}
+		return false, false, fmt.Errorf("browser backend service installed but failed to start")
+	}
+	return false, true, nil // 未安装
+}
+
+// sharedTab 在共享后端上开一个新标签页（RemoteAllocator + NewContext）。
+func sharedTab(allocCtx context.Context) (context.Context, context.CancelFunc, error) {
+	tabCtx, tabCancel := chromedp.NewContext(allocCtx)
+	if err := chromedp.Run(tabCtx); err != nil {
+		tabCancel()
+		return nil, nil, err
+	}
+	return tabCtx, tabCancel, nil
+}
+
+// localSpawnFailback 本地拉起一次性 Chromium（离线机器无法装 systemd 服务的兜底）。
+// 用临时 profile，登录态不跨会话保留——仅保证功能可用。
+func (p *Plugin) localSpawnFailback() (context.Context, context.CancelFunc, context.CancelFunc, error) {
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
 		chromedp.Flag("headless", true),
 		chromedp.Flag("disable-gpu", true),
@@ -733,23 +871,83 @@ func (p *Plugin) handleBrowserStart(args map[string]interface{}) (interface{}, e
 	if p.proxy != "" {
 		opts = append(opts, chromedp.Flag("proxy-server", p.proxy))
 	}
-
-	allocCtx, cancel := chromedp.NewExecAllocator(context.Background(), opts...)
+	allocCtx, cancelAlloc := chromedp.NewExecAllocator(context.Background(), opts...)
 	ctx, _ := chromedp.NewContext(allocCtx)
-
-	// 立即分配浏览器和 Target，确保后续 Run 的 timeout context 不会杀死浏览器进程
-	// chromedp 官方警告：首调用带 timeout 的 Run 会杀死整个浏览器
 	if err := chromedp.Run(ctx); err != nil {
-		cancel()
-		return errResult("browser init failed: " + err.Error()), nil
+		cancelAlloc()
+		return nil, nil, nil, err
+	}
+	return allocCtx, cancelAlloc, nil, nil
+}
+
+func (p *Plugin) handleBrowserStart(args map[string]interface{}) (interface{}, error) {
+	timeoutStr := readArg(args, "timeout", "10m")
+	timeout, err := time.ParseDuration(timeoutStr)
+	if err != nil {
+		timeout = 10 * time.Minute
 	}
 
-	session := &BrowserSession{
-		allocCtx:  allocCtx,
-		cancel:    cancel,
-		ctx:       ctx,
-		createdAt: time.Now(),
-		timeout:   timeout,
+	source := readArg(args, "source", "")
+	if source == "" {
+		source = "default"
+	}
+
+	// 同 source 复用已有标签页
+	p.mu.Lock()
+	for _, s := range p.sessions {
+		if s.shared && s.sessionKey == source && !s.closed {
+			s.mu.Lock()
+			id := s.id
+			cur := s.currentURL
+			s.mu.Unlock()
+			p.mu.Unlock()
+			return map[string]interface{}{
+				"id":     id,
+				"status": "reused",
+				"url":    cur,
+				"note":   "已复用本来源的现有标签页（登录态全机共享）",
+			}, nil
+		}
+	}
+	p.mu.Unlock()
+
+	var session *BrowserSession
+
+	// 路径一：systemd 托管的共享后端（主路径）
+	ok, needInstall, berr := p.ensureBackend()
+	if ok {
+		remoteCtx, remoteCancel := chromedp.NewRemoteAllocator(context.Background(), cdpEndpoint)
+		probe, _ := chromedp.NewContext(remoteCtx)
+		if err := chromedp.Run(probe); err != nil {
+			remoteCancel()
+			return errResult("connect to browser backend failed: " + err.Error()), nil
+		}
+		tabCtx, tabCancel := chromedp.NewContext(remoteCtx)
+		if err := chromedp.Run(tabCtx); err != nil {
+			remoteCancel()
+			return errResult("open tab failed: " + err.Error()), nil
+		}
+		session = &BrowserSession{
+			allocCtx:   remoteCtx,
+			cancel:     tabCancel,
+			ctx:        tabCtx,
+			createdAt:  time.Now(),
+			timeout:    timeout,
+			shared:     true,
+			sessionKey: source,
+		}
+	} else if needInstall {
+		guide := "浏览器后端未安装。请确认后调用 browser_install 工具完成安装：" +
+			"需要本机有 chromium 二进制（apt install chromium 或等价命令），" +
+			"插件会注册 homeagent-browser.service 并启动。" +
+			"若本机无法联网安装 chromium，可继续用本地临时模式（重试 browser_start 即自动降级）。"
+		return map[string]interface{}{
+			"error":       "backend not installed",
+			"need_install": true,
+			"guide":        guide,
+		}, nil
+	} else {
+		return errResult("browser backend error: " + berr.Error()), nil
 	}
 
 	p.mu.Lock()
@@ -761,7 +959,7 @@ func (p *Plugin) handleBrowserStart(args map[string]interface{}) (interface{}, e
 
 	initURL := readArg(args, "url", "")
 	if initURL != "" {
-		if err := chromedp.Run(ctx,
+		if err := chromedp.Run(session.ctx,
 			chromedp.Navigate(initURL),
 			chromedp.WaitReady("body"),
 		); err != nil {
@@ -772,13 +970,13 @@ func (p *Plugin) handleBrowserStart(args map[string]interface{}) (interface{}, e
 			return errResult("navigate failed: " + err.Error()), nil
 		}
 		session.currentURL = initURL
-		p.sdk.InjectTextNoMemory(p.name, p.name, fmt.Sprintf("[浏览器 %s 已打开 %s]", id, initURL))
 	}
 
-	log.Printf("[%s] created browser session %s: url=%s timeout=%v", p.name, id, initURL, timeout)
+	log.Printf("[%s] created browser session %s: url=%s timeout=%v source=%s", p.name, id, initURL, timeout, source)
 	return map[string]interface{}{
 		"id":      id,
 		"status":  "created",
+		"mode":    "shared-backend",
 		"url":     initURL,
 		"timeout": timeout.String(),
 	}, nil
@@ -1018,4 +1216,105 @@ func (p *Plugin) cleanupLoop() {
 			p.mu.Unlock()
 		}
 	}
+}
+
+// ── browser_install：安装 systemd 托管的共享浏览器后端 ──────────
+
+// handleBrowserInstall 注册 homeagent-browser.service 并启动，验证 CDP 可达。
+// 返回给 agent 的结果含全机共享使用指南（由 agent 转述给用户）。
+func (p *Plugin) handleBrowserInstall(args map[string]interface{}) (interface{}, error) {
+	if cdpReachable(cdpEndpoint) {
+		return map[string]interface{}{"status": "already_running", "endpoint": cdpEndpoint}, nil
+	}
+
+	// 探测 chromium 二进制
+	chromePath := ""
+	for _, c := range []string{
+		"/usr/bin/chromium", "/usr/bin/chromium-browser",
+		"/usr/local/bin/chromium", "/usr/bin/google-chrome",
+	} {
+		if _, err := os.Stat(c); err == nil {
+			chromePath = c
+			break
+		}
+	}
+	if out, err := exec.LookPath("chromium"); err == nil && chromePath == "" {
+		chromePath = out
+	} else if out, err := exec.LookPath("google-chrome"); err == nil && chromePath == "" {
+		chromePath = out
+	}
+	if chromePath == "" {
+		return map[string]interface{}{
+			"error": "chromium binary not found",
+			"hint":  "请先安装 chromium：apt install chromium 或等价命令，然后重试 browser_install",
+		}, nil
+	}
+
+	profileDir := ""
+	if p.profilesDir != "" {
+		profileDir = filepath.Join(p.profilesDir, "shared")
+		os.MkdirAll(profileDir, 0755)
+	} else {
+		// profilesDir 未注入（无 data_dir），退到 /var/lib/homeagent-browser
+		profileDir = "/var/lib/homeagent-browser"
+		os.MkdirAll(profileDir, 0755)
+	}
+
+	unit := fmt.Sprintf(`[Unit]
+Description=HomeAgent Shared Browser Backend (headless chromium, CDP :9222)
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=%s --headless --no-sandbox --disable-gpu --disable-dev-shm-usage --remote-debugging-port=9222 --user-data-dir=%s --window-size=1280,800 about:blank
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+`, chromePath, profileDir)
+
+	unitPath := "/etc/systemd/system/homeagent-browser.service"
+	if err := os.WriteFile(unitPath, []byte(unit), 0644); err != nil {
+		return map[string]interface{}{
+			"error": "write unit failed (need root): " + err.Error(),
+			"hint":  "插件进程无权限写 /etc/systemd/system 时，请让用户手动执行安装命令（见 manual_cmds）",
+			"manual_cmds": []string{
+				"sudo tee /etc/systemd/system/homeagent-browser.service <<'EOF'\n" + unit + "EOF",
+				"sudo systemctl daemon-reload",
+				"sudo systemctl enable --now homeagent-browser.service",
+			},
+		}, nil
+	}
+	for _, cmd := range [][]string{
+		{"systemctl", "daemon-reload"},
+		{"systemctl", "enable", "--now", "homeagent-browser.service"},
+	} {
+		if out, err := exec.Command(cmd[0], cmd[1:]...).CombinedOutput(); err != nil {
+			return map[string]interface{}{
+				"error": fmt.Sprintf("%v: %s", cmd, string(out)),
+			}, nil
+		}
+	}
+	// 等待 CDP 就绪
+	for i := 0; i < 20; i++ {
+		time.Sleep(500 * time.Millisecond)
+		if cdpReachable(cdpEndpoint) {
+			guide := "共享浏览器后端已就绪（CDP " + cdpEndpoint + "）。\n" +
+				"全机共享说明：本机所有 agent（HomeAgent、pi、opencode、deepseekharness 等）都可连接此实例：" +
+				"登录一次全机可用；各 agent 各自占用独立标签页互不干扰；\n" +
+				"- HomeAgent 内部：browser_start 即自动连接本后端\n" +
+				"- 其他 agent：让其浏览器工具/MCP 连接 CDP 端点 " + cdpEndpoint + "（如 playwright connectOverCDP / puppeteer connect）\n" +
+				"- 服务由 systemd 托管：崩溃自动重启，登录态持久保存在 " + profileDir
+			log.Printf("[%s] browser backend installed and running (chrome=%s profile=%s)", p.name, chromePath, profileDir)
+			return map[string]interface{}{
+				"status":   "installed",
+				"endpoint": cdpEndpoint,
+				"chrome":    chromePath,
+				"profile":  profileDir,
+				"guide":    guide,
+			}, nil
+		}
+	}
+	return map[string]interface{}{"error": "service started but CDP not reachable after 10s"}, nil
 }

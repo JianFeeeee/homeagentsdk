@@ -224,7 +224,7 @@ func (p *Plugin) saveTodos() {
 		"next_id": p.nextTID,
 	}, "", "  ")
 	p.mu.RUnlock()
-	os.WriteFile(p.todoPath, data, 0644)
+	atomicWriteJSON(p.todoPath, data)
 }
 
 func (p *Plugin) saveMemos() {
@@ -234,7 +234,7 @@ func (p *Plugin) saveMemos() {
 		"next_id": p.nextMID,
 	}, "", "  ")
 	p.mu.RUnlock()
-	os.WriteFile(p.memoPath, data, 0644)
+	atomicWriteJSON(p.memoPath, data)
 }
 
 // ── 待办：未完成计数与提醒 ──
@@ -499,4 +499,13 @@ func (p *Plugin) cleanupData() {
 	if p.memoPath != "" {
 		os.Remove(p.memoPath)
 	}
+}
+
+// atomicWriteJSON 原子写 JSON：先写临时文件再 rename，避免进程崩溃截断数据文件。
+func atomicWriteJSON(path string, data []byte) error {
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
 }

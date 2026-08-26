@@ -467,7 +467,7 @@ func (p *Plugin) saveData() {
 		SeenGUIDs: p.seenGUIDs,
 	}
 	b, _ := json.MarshalIndent(data, "", "  ")
-	os.WriteFile(p.dataFile(), b, 0644)
+	atomicWriteJSON(p.dataFile(), b)
 }
 
 // cleanupData 卸载时清理订阅数据目录（feeds.json 等）
@@ -486,3 +486,12 @@ func (p *Plugin) cleanupData() {
 }
 
 
+
+// atomicWriteJSON 原子写 JSON：先写临时文件再 rename，避免进程崩溃截断数据文件。
+func atomicWriteJSON(path string, data []byte) error {
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
+}

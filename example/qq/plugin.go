@@ -739,6 +739,11 @@ func (p *Plugin) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		return
 	}
+	// 群消息到达即记录（用于排查 napcat→webhook 链路漏报/丢弃）
+	if evt.MessageType == "group" {
+		log.Printf("[qq] webhook recv group msg id=%d from=%d in=%d raw=%.100s",
+			evt.MessageID, evt.UserID, evt.GroupID, evt.RawMessage)
+	}
 
 	rawCQ := evt.RawMessage
 	text := rawCQ
@@ -763,6 +768,7 @@ func (p *Plugin) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 	if evt.MessageType == "group" {
 		if !p.isGroupAllowed(evt.GroupID) {
+			log.Printf("[qq] group msg from %d rejected: policy=%s", evt.GroupID, p.groupPolicy)
 			w.WriteHeader(http.StatusOK)
 			return
 		}
@@ -773,6 +779,9 @@ func (p *Plugin) handleWebhook(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if !p.isAtBot(evt.Message) {
+			// 诊断：@ 解析失败时打印 at 段原文与 botID，定位漏报问题
+			log.Printf("[qq] group msg from %d/%d not @bot (botID=%d, raw=%.120s)",
+				evt.GroupID, evt.UserID, p.botID, rawCQ)
 			w.WriteHeader(http.StatusOK)
 			return
 		}
@@ -810,6 +819,7 @@ func (p *Plugin) handleWebhook(w http.ResponseWriter, r *http.Request) {
 				if evt.GroupID == rule.GroupID {
 					mcMsg := fmt.Sprintf("%s 说 %s", nickname, text)
 					go func(r ForwardRule, msg string) {
+						defer func() { _ = recover() }()
 						if err := rconSend(r.Host, r.Port, r.Password, "say "+msg); err != nil {
 							log.Printf("[qq] rcon forward to %s:%d: %v", r.Host, r.Port, err)
 						}
@@ -980,6 +990,7 @@ func (p *Plugin) handleGetMessage(args map[string]interface{}) (interface{}, err
 
 	// 异步标记已读
 	go func() {
+		defer func() { _ = recover() }() // 后台任务不允许 panic 冒泡带崩进程
 		if d.MessageType == "group" && d.GroupID > 0 {
 			p.napcat("mark_group_msg_as_read", map[string]interface{}{"group_id": d.GroupID})
 		} else if d.UserID > 0 {
@@ -1070,20 +1081,32 @@ func (p *Plugin) handleChannelOutput(args map[string]interface{}) (interface{}, 
 		}
 		return p.napcat("send_private_msg", msg)
 
-	case "image":
-		msg := map[string]interface{}{"message": fmt.Sprintf("[CQ:image,file=%s]", payload)}
-		if groupID != 0 {
-			msg["group_id"] = groupID
-		} else {
-			msg["user_id"] = userID
+	case "image", "file":
+		// 收敛到 output 通道：payload 支持本地路径或 http(s) URL。
+		// 本地路径拷入 NapCat 共享目录转 file:// URI（与 voice 分支同模式），
+		// 此后 agent 发本地文件不再需要单独的 upload_group_file 工具。
+		uri := payload
+		if !strings.HasPrefix(payload, "http://") && !strings.HasPrefix(payload, "https://") &&
+			!strings.HasPrefix(payload, "file://") {
+			if _, err := os.Stat(payload); err != nil {
+				return nil, fmt.Errorf("%s 文件不存在: %s", rawType, payload)
+			}
+			os.MkdirAll(p.remoteDir, 0755)
+			dest := filepath.Join(p.remoteDir, sanitizeFilename(filepath.Base(payload)))
+			data, err := os.ReadFile(payload)
+			if err != nil {
+				return nil, fmt.Errorf("读取文件失败: %w", err)
+			}
+			if err := os.WriteFile(dest, data, 0644); err != nil {
+				return nil, fmt.Errorf("写入共享目录失败: %w", err)
+			}
+			uri = "file:///app/files/" + filepath.Base(dest)
 		}
-		if groupID != 0 {
-			return p.napcat("send_group_msg", msg)
+		cqTag := "file"
+		if rawType == "image" {
+			cqTag = "image"
 		}
-		return p.napcat("send_private_msg", msg)
-
-	case "file":
-		msg := map[string]interface{}{"message": fmt.Sprintf("[CQ:file,file=%s]", payload)}
+		msg := map[string]interface{}{"message": fmt.Sprintf("[CQ:%s,file=%s]", cqTag, uri)}
 		if groupID != 0 {
 			msg["group_id"] = groupID
 		} else {
@@ -1638,7 +1661,8 @@ func (p *Plugin) handleGetGroupFiles(args map[string]interface{}) (interface{}, 
 			return resp, nil
 		}
 		dlURL := parsed.Data.URL
-		httpResp, err := http.Get(dlURL)
+		client := &http.Client{Timeout: 120 * time.Second}
+		httpResp, err := client.Get(dlURL)
 		if err != nil {
 			return nil, fmt.Errorf("download: %w", err)
 		}
@@ -1693,6 +1717,11 @@ func (p *Plugin) handleDownloadFile(args map[string]interface{}) (interface{}, e
 	task := p.addDownloadTask(fileID, filename)
 
 	go func(t *DownloadTask, fid, fname, furl string, gid, uid int64) {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("[qq] download task %s panic: %v", fid, r)
+			}
+		}()
 		savePath := ""
 		errMsg := ""
 		if furl != "" {
