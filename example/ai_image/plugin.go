@@ -21,6 +21,7 @@ type Plugin struct {
 	provider string
 	model   string
 	size    string
+	baseURL string
 }
 
 func NewPluginFactory(name string, config map[string]interface{}) (sdk.Plugin, error) {
@@ -112,9 +113,14 @@ func (p *Plugin) Start(s *sdk.PluginSDK) error {
 		Category: "ai_image", Secret: true,
 	})
 	s.Settings().RegisterDef(sdk.ConfigDef{
+		Key: "base_url", Default: "", Type: "string",
+		DisplayName: "Base URL", Description: "自定义 OpenAI 兼容网关地址（不带 /v1 尾缀，如 http://127.0.0.1:8081）；为空走官方 https://api.openai.com",
+		Category:    "ai_image",
+	})
+	s.Settings().RegisterDef(sdk.ConfigDef{
 		Key: "provider", Default: "openai", Type: "string",
 		DisplayName: "Provider", Description: "Image generation provider: openai / stability",
-		Category: "ai_image",
+		Category:    "ai_image",
 	})
 	s.Settings().RegisterDef(sdk.ConfigDef{
 		Key: "model", Default: "dall-e-3", Type: "string",
@@ -131,6 +137,7 @@ func (p *Plugin) Start(s *sdk.PluginSDK) error {
 	p.provider = getSetting(s.Settings(), "provider", "openai")
 	p.model = getSetting(s.Settings(), "model", "dall-e-3")
 	p.size = getSetting(s.Settings(), "size", "1024x1024")
+	p.baseURL = strings.TrimRight(strings.TrimSpace(getSetting(s.Settings(), "base_url", "")), "/")
 
 	tp := p.name + "_"
 	s.RegisterTool(tp+"generate", sdk.ToolDef{
@@ -209,6 +216,14 @@ func (p *Plugin) handleGenerate(args map[string]interface{}) (interface{}, error
 }
 
 func (p *Plugin) generateOpenAI(prompt, model, size string, n int, apiKey string) (interface{}, error) {
+	// 上游地址：base_url 非空时走自定义网关（如本机 llmsproxy），约定不带 /v1 尾缀；
+	// 为空保持官方直连。兼容误配了 /v1 尾缀的情况（去重）。
+	endpoint := "https://api.openai.com/v1/images/generations"
+	if p.baseURL != "" {
+		base := strings.TrimSuffix(p.baseURL, "/v1")
+		endpoint = base + "/v1/images/generations"
+	}
+
 	body := openAIReq{
 		Model:          model,
 		Prompt:         prompt,
@@ -218,7 +233,7 @@ func (p *Plugin) generateOpenAI(prompt, model, size string, n int, apiKey string
 	}
 
 	b, _ := json.Marshal(body)
-	req, _ := http.NewRequest("POST", "https://api.openai.com/v1/images/generations", bytes.NewReader(b))
+	req, _ := http.NewRequest("POST", endpoint, bytes.NewReader(b))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 
