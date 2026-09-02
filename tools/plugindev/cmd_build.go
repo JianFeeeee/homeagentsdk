@@ -24,7 +24,8 @@ func cmdBuild(args []string) {
 	// Read all config from plg.json first
 	plg, err := readPlgJSON("plg.json")
 	if err != nil {
-		fmt.Printf("error: read plg.json: %v\n", err); os.Exit(1)
+		fmt.Printf("error: read plg.json: %v\n", err)
+		os.Exit(1)
 	}
 
 	// Base config from plg.json
@@ -39,11 +40,13 @@ func cmdBuild(args []string) {
 		switch args[i] {
 		case "--outdir":
 			if i+1 < len(args) {
-				outDir = args[i+1]; i++
+				outDir = args[i+1]
+				i++
 			}
 		case "--target":
 			if i+1 < len(args) {
-				targets = append(targets, args[i+1]); i++
+				targets = append(targets, args[i+1])
+				i++
 			}
 		case "--bundle":
 			bundle = true
@@ -51,11 +54,13 @@ func cmdBuild(args []string) {
 			bundle = false
 		case "--sdk-path":
 			if i+1 < len(args) {
-				sdkPath = args[i+1]; i++
+				sdkPath = args[i+1]
+				i++
 			}
 		case "--replace", "-R":
 			if i+1 < len(args) {
-				cliReplaces = append(cliReplaces, args[i+1]); i++
+				cliReplaces = append(cliReplaces, args[i+1])
+				i++
 			}
 		}
 	}
@@ -115,42 +120,89 @@ var allBundleTargets = []struct {
 	{"windows/amd64", "plugin.dll"},
 }
 
+// allProcBundleTargets 是子进程模式的 bundle 目标。
+//
+// 与 C ABI 版的差异：产物统一叫 plugin.bin（子进程模式无平台特有扩展名，
+// 因为进程边界本身就是 ABI 边界），故 zip 内按平台加后缀区分；
+// 内核安装时按当前平台挑对应条目重命名为 plugin.bin。
+var allProcBundleTargets = []struct {
+	target string
+	entry  string
+}{
+	{"linux/amd64", "plugin.bin.linux.amd64"},
+	{"darwin/amd64", "plugin.bin.darwin.amd64"},
+	{"windows/amd64", "plugin.bin.windows.amd64"},
+}
+
 func buildBundle(plg *PlgConfig, outDir string, sdkPath string) {
 	os.MkdirAll(outDir, 0755)
 	buildDir := "build"
 	os.MkdirAll(buildDir, 0755)
 
-	// Auto-generate C ABI bridge for non-Windows
-	bridgeCleanup := generateBridge("")
-	defer bridgeCleanup()
+	proc := isProcEntry(plg.Entry)
+
+	// 生成运行时：proc 模式写子进程 main（零 cgo），否则写 C ABI bridge
+	var runtimeCleanup func()
+	if proc {
+		cl, err := generateProcRuntime()
+		if err != nil {
+			fmt.Printf("  error: %v\n", err)
+			return
+		}
+		runtimeCleanup = cl
+	} else {
+		runtimeCleanup = generateBridge("")
+	}
+	defer runtimeCleanup()
+
 	thirdpartCleanup := linkThirdpart(plg, "linux/amd64")
 	defer thirdpartCleanup()
 
 	var binaries []binEntry
 
-	for _, bt := range allBundleTargets {
-		cfg, errMsg := resolveBuild(bt.target)
+	// proc 模式下各平台产物同名（plugin.bin），故 zip 内按平台加后缀区分。
+	targets := allBundleTargets
+	if proc {
+		targets = allProcBundleTargets
+	}
+
+	for _, bt := range targets {
+		cfg, errMsg := resolveBuild(bt.target, proc)
 		if cfg == nil {
 			fmt.Printf("  error: %s\n", errMsg)
 			return
 		}
 
-		outPath := filepath.Join(buildDir, cfg.entryFile)
+		// proc 模式：每平台产物落到独立路径，避免相互覆盖
+		outName := cfg.entryFile
+		if proc {
+			outName = fmt.Sprintf("%s_%s_%s", cfg.entryFile, cfg.goos, cfg.goarch)
+		}
+		outPath := filepath.Join(buildDir, outName)
 
-		cmd := exec.Command("go", "build", "-buildmode=c-shared", "-o", outPath)
-		cmd.Env = os.Environ()
-		cmd.Env = append(cmd.Env, "GOOS="+cfg.goos, "GOARCH="+cfg.goarch, "CGO_ENABLED=1")
-
-		if cfg.goos == "windows" {
-			cc := detectWindowsCC()
-			if cc != "" {
-				cmd.Env = append(cmd.Env, "CC="+cc)
+		var cmd *exec.Cmd
+		if proc {
+			cmd = exec.Command("go", "build", "-trimpath", "-o", outPath)
+			cmd.Env = os.Environ()
+			cmd.Env = append(cmd.Env, "GOOS="+cfg.goos, "GOARCH="+cfg.goarch, "CGO_ENABLED=0")
+		} else {
+			cmd = exec.Command("go", "build", "-buildmode=c-shared", "-o", outPath)
+			cmd.Env = os.Environ()
+			cmd.Env = append(cmd.Env, "GOOS="+cfg.goos, "GOARCH="+cfg.goarch, "CGO_ENABLED=1")
+			if cfg.goos == "windows" {
+				if cc := detectWindowsCC(); cc != "" {
+					cmd.Env = append(cmd.Env, "CC="+cc)
+				}
 			}
 		}
 
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
-		fmt.Printf("  compiling %s/%s (-buildmode=c-shared)...\n", cfg.goos, cfg.goarch)
+		mode := "-buildmode=c-shared"
+		if proc {
+			mode = "子进程模式，CGO_ENABLED=0"
+		}
+		fmt.Printf("  compiling %s/%s (%s)...\n", cfg.goos, cfg.goarch, mode)
 		if err := cmd.Run(); err != nil {
 			fmt.Printf("  error: build %s/%s: %v\n", cfg.goos, cfg.goarch, err)
 			return
@@ -168,7 +220,11 @@ func buildBundle(plg *PlgConfig, outDir string, sdkPath string) {
 	for p := range platforms {
 		plats = append(plats, p)
 	}
-	writePluginJSON(plg, plats, "plugin.so")
+	bundleEntry := "plugin.so"
+	if proc {
+		bundleEntry = procEntryFile
+	}
+	writePluginJSON(plg, plats, bundleEntry)
 
 	// package single .hmap with correctly named entries
 	hmapPath := filepath.Join(outDir, fmt.Sprintf("%s_bundle.hmap", toSnake(plg.NameEn)))
@@ -228,10 +284,15 @@ func writePluginJSON(plg *PlgConfig, platforms []string, entry string) {
 type buildConfig struct {
 	goos      string
 	goarch    string
-	entryFile string // "plugin.so" or "plugin.dll"
+	entryFile string // "plugin.bin"(子进程) | "plugin.so" | "plugin.dylib" | "plugin.dll"
+	proc      bool   // true = 子进程模式（普通 go build，零 cgo）
 }
 
-func resolveBuild(target string) (*buildConfig, string) {
+// resolveBuild 解析目标平台与产物形态。
+//
+// proc 为真时统一产出 plugin.bin：子进程模式下不存在平台特有的动态库扩展名，
+// 因为进程边界本身就是 ABI 边界（§3.1）——这也是交叉编译得以简化的原因。
+func resolveBuild(target string, proc bool) (*buildConfig, string) {
 	if target == "lua" || target == "" {
 		return nil, "lua"
 	}
@@ -241,6 +302,15 @@ func resolveBuild(target string) (*buildConfig, string) {
 		goos = runtime.GOOS
 		if goarch == "" {
 			goarch = runtime.GOARCH
+		}
+	}
+
+	if proc {
+		switch goos {
+		case "linux", "darwin", "freebsd", "windows":
+			return &buildConfig{goos: goos, goarch: goarch, entryFile: procEntryFile, proc: true}, ""
+		default:
+			return nil, fmt.Sprintf("unsupported OS %q", goos)
 		}
 	}
 
@@ -403,8 +473,8 @@ func buildTarget(plg *PlgConfig, target, outDir, sdkPath string) {
 		return
 	}
 
-	// Resolve build config
-	cfg, errMsg := resolveBuild(target)
+	// Resolve build config（proc 模式由 plg.json 的 entry 决定）
+	cfg, errMsg := resolveBuild(target, isProcEntry(plg.Entry))
 	if cfg == nil {
 		fmt.Printf("  error: %s\n", errMsg)
 		return
@@ -414,9 +484,19 @@ func buildTarget(plg *PlgConfig, target, outDir, sdkPath string) {
 	os.MkdirAll(buildDir, 0755)
 	outPath := filepath.Join(buildDir, cfg.entryFile)
 
-	// Auto-generate C ABI bridge (all platforms use c-shared)
-	bridgeCleanup := generateBridge(cfg.goos)
-	defer bridgeCleanup()
+	// 生成运行时：proc 模式写子进程 main（零 cgo），否则写 C ABI bridge
+	var runtimeCleanup func()
+	if cfg.proc {
+		cl, err := generateProcRuntime()
+		if err != nil {
+			fmt.Printf("  error: %v\n", err)
+			return
+		}
+		runtimeCleanup = cl
+	} else {
+		runtimeCleanup = generateBridge(cfg.goos)
+	}
+	defer runtimeCleanup()
 
 	// Auto-link thirdpart/ contents + source_dirs + replace targets
 	thirdpartCleanup := linkThirdpart(plg, target)
@@ -425,28 +505,33 @@ func buildTarget(plg *PlgConfig, target, outDir, sdkPath string) {
 	// Write plugin.json with the correct entry for this target
 	writePluginJSON(plg, nil, cfg.entryFile)
 
-	cmd := exec.Command("go", "build", "-buildmode=c-shared", "-o", outPath)
-	cmd.Env = os.Environ()
-	cmd.Env = append(cmd.Env, "GOOS="+cfg.goos, "GOARCH="+cfg.goarch, "CGO_ENABLED=1")
-
-	// Auto-detect MinGW gcc on Windows
-	if cfg.goos == "windows" {
-		cc := detectWindowsCC()
-		if cc != "" {
-			cmd.Env = append(cmd.Env, "CC="+cc)
+	var cmd *exec.Cmd
+	if cfg.proc {
+		// 子进程模式：普通 go build，零 cgo。
+		// 交叉编译不再需要目标平台的 C 工具链——进程边界即 ABI 边界（§3.1）。
+		cmd = exec.Command("go", "build", "-trimpath", "-o", outPath)
+		cmd.Env = os.Environ()
+		cmd.Env = append(cmd.Env, "GOOS="+cfg.goos, "GOARCH="+cfg.goarch, "CGO_ENABLED=0")
+	} else {
+		cmd = exec.Command("go", "build", "-buildmode=c-shared", "-o", outPath)
+		cmd.Env = os.Environ()
+		cmd.Env = append(cmd.Env, "GOOS="+cfg.goos, "GOARCH="+cfg.goarch, "CGO_ENABLED=1")
+		// Auto-detect MinGW gcc on Windows
+		if cfg.goos == "windows" {
+			if cc := detectWindowsCC(); cc != "" {
+				cmd.Env = append(cmd.Env, "CC="+cc)
+			}
 		}
 	}
 
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
-	// DEBUG: list files before building
-	entries, _ := os.ReadDir(".")
-	for _, e := range entries {
-		fmt.Printf("  [DEBUG] file: %s\n", e.Name())
+	mode := "-buildmode=c-shared"
+	if cfg.proc {
+		mode = "子进程模式，CGO_ENABLED=0"
 	}
-
-	fmt.Printf("  compiling %s/%s (-buildmode=c-shared)...\n", cfg.goos, cfg.goarch)
+	fmt.Printf("  compiling %s/%s (%s)...\n", cfg.goos, cfg.goarch, mode)
 	if err := cmd.Run(); err != nil {
 		fmt.Printf("  error: build %s/%s: %v\n", cfg.goos, cfg.goarch, err)
 		return
