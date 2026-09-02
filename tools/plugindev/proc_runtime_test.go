@@ -3,6 +3,7 @@ package main
 import (
 	"go/parser"
 	"go/token"
+	"os"
 	"regexp"
 	"strings"
 	"testing"
@@ -285,70 +286,109 @@ func TestProcTemplate_RejectsVersionMismatch(t *testing.T) {
 	}
 }
 
-// isProcEntry 只认 plugin.bin。
-func TestIsProcEntry(t *testing.T) {
-	if !isProcEntry("plugin.bin") {
-		t.Error("plugin.bin 应为 proc 模式")
-	}
-	for _, e := range []string{"plugin.so", "plugin.dll", "plugin.dylib", "main.lua", "", "plugin.exe"} {
-		if isProcEntry(e) {
-			t.Errorf("%q 不应被判为 proc 模式", e)
-		}
-	}
-}
-
-// proc 模式下各平台产物统一为 plugin.bin（进程边界即 ABI 边界，无平台扩展名）。
-func TestResolveBuild_ProcModeUsesBinOnAllPlatforms(t *testing.T) {
-	for _, target := range []string{"linux/amd64", "darwin/arm64", "windows/amd64", "freebsd/amd64"} {
-		cfg, errMsg := resolveBuild(target, true)
-		if cfg == nil {
-			t.Fatalf("resolveBuild(%q, proc) 失败: %s", target, errMsg)
-		}
-		if cfg.entryFile != procEntryFile {
-			t.Errorf("%s: proc 模式产物应为 %s，实际 %s", target, procEntryFile, cfg.entryFile)
-		}
-		if !cfg.proc {
-			t.Errorf("%s: proc 标志应为 true", target)
-		}
-	}
-}
-
-// 非 proc 模式行为不变（回归保护：.so 通道必须与改动前一致）。
-func TestResolveBuild_CABIModeUnchanged(t *testing.T) {
-	cases := map[string]string{
-		"linux/amd64":   "plugin.so",
-		"darwin/amd64":  "plugin.dylib",
-		"freebsd/amd64": "plugin.so",
-		"windows/amd64": "plugin.dll",
-	}
-	for target, want := range cases {
-		cfg, errMsg := resolveBuild(target, false)
+// 全平台统一产出 plugin.bin。
+//
+// 这是三套独立 ABI 实现（.so/.dylib/.dll）收敛为单一 RPC 实现的直接后果：
+// 进程边界本身就是 ABI 边界，不存在平台特有的动态库扩展名。
+// §9.2 记录的「Windows DLL 路径只下发 3 字段、无写回」随之消失——
+// Windows 走的是与 Linux 完全相同的 RPC 实现。
+func TestResolveBuild_AllPlatformsProduceBin(t *testing.T) {
+	for _, target := range []string{
+		"linux/amd64", "linux/arm64",
+		"darwin/amd64", "darwin/arm64",
+		"windows/amd64",
+		"freebsd/amd64",
+	} {
+		cfg, errMsg := resolveBuild(target)
 		if cfg == nil {
 			t.Fatalf("resolveBuild(%q) 失败: %s", target, errMsg)
 		}
-		if cfg.entryFile != want {
-			t.Errorf("%s: 应产出 %s，实际 %s", target, want, cfg.entryFile)
-		}
-		if cfg.proc {
-			t.Errorf("%s: 非 proc 模式的 proc 标志应为 false", target)
+		if cfg.entryFile != procEntryFile {
+			t.Errorf("%s: 产物应为 %s，实际 %s", target, procEntryFile, cfg.entryFile)
 		}
 	}
 }
 
-// bundle 模式下 proc 产物在 zip 内按平台加后缀（同名会相互覆盖）。
-func TestProcBundleTargets_HavePlatformSuffixedEntries(t *testing.T) {
+// lua 目标仍走解释器路径（entry 字段唯一仍在使用的用途）。
+func TestResolveBuild_LuaIsSeparatePath(t *testing.T) {
+	for _, target := range []string{"lua", ""} {
+		cfg, kind := resolveBuild(target)
+		if cfg != nil {
+			t.Errorf("%q 应返回 nil cfg（Lua 不经 Go 编译）", target)
+		}
+		if kind != "lua" {
+			t.Errorf("%q 应识别为 lua，实际 %q", target, kind)
+		}
+	}
+}
+
+// 不支持的平台明确报错，不静默产出错误产物。
+func TestResolveBuild_UnsupportedOSErrors(t *testing.T) {
+	cfg, errMsg := resolveBuild("plan9/amd64")
+	if cfg != nil {
+		t.Error("不支持的平台应返回 nil cfg")
+	}
+	if !strings.Contains(errMsg, "unsupported") {
+		t.Errorf("应给出 unsupported 提示，实际 %q", errMsg)
+	}
+}
+
+// bundle 产物在 zip 内按平台加后缀（全平台同名 plugin.bin 会相互覆盖）。
+func TestBundleTargets_HavePlatformSuffixedEntries(t *testing.T) {
 	seen := map[string]bool{}
-	for _, bt := range allProcBundleTargets {
+	for _, bt := range allBundleTargets {
 		if seen[bt.entry] {
 			t.Errorf("zip 条目名重复: %s（会相互覆盖）", bt.entry)
 		}
 		seen[bt.entry] = true
 		if !strings.HasPrefix(bt.entry, procEntryFile+".") {
-			t.Errorf("proc bundle 条目 %q 应以 %s. 为前缀", bt.entry, procEntryFile)
+			t.Errorf("bundle 条目 %q 应以 %s. 为前缀", bt.entry, procEntryFile)
 		}
 	}
-	if len(allProcBundleTargets) != len(allBundleTargets) {
-		t.Errorf("proc 与 cabi 的 bundle 平台数应一致：%d vs %d",
-			len(allProcBundleTargets), len(allBundleTargets))
+	if len(allBundleTargets) == 0 {
+		t.Error("bundle 目标表不应为空")
+	}
+}
+
+// C ABI 工具链残留必须彻底清除：不得再有 .so/.dylib/.dll 产物路径，
+// 也不得再引用 c-shared 构建模式或 MinGW 探测。
+func TestToolchain_NoCABIResiduals(t *testing.T) {
+	for _, f := range []string{"cmd_build.go", "templates.go", "cmd_init.go", "proc_runtime.go"} {
+		data, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatalf("读 %s: %v", f, err)
+		}
+		src := stripComments(t, string(data))
+		for _, forbidden := range []string{
+			"c-shared",
+			"CGO_ENABLED=1",
+			"detectWindowsCC",
+			"generateBridge",
+			"tmplLinuxBridge",
+			"tmplPluginInitC",
+		} {
+			if strings.Contains(src, forbidden) {
+				t.Errorf("%s 仍含 C ABI 残留 %q", f, forbidden)
+			}
+		}
+	}
+}
+
+// Go 插件的构建不再读 plg.json 的 entry 值。
+//
+// 这是「外部插件零改动」的关键：17 个存量插件的 plg.json 都写着 "plugin.so"，
+// 若把 entry 当通道开关，迁移就得改 17 个文件。
+func TestToolchain_IgnoresEntryForGoPlugins(t *testing.T) {
+	data, err := os.ReadFile("cmd_build.go")
+	if err != nil {
+		t.Fatalf("读 cmd_build.go: %v", err)
+	}
+	src := stripComments(t, string(data))
+	if strings.Contains(src, "isProcEntry") {
+		t.Error("isProcEntry 应已删除——Go 插件一律产出 plugin.bin，不看 entry 值")
+	}
+	// entry 仅剩 Lua 判定这一处用途
+	if !strings.Contains(src, "luaEntryFile") {
+		t.Error("IsLua 应改用 luaEntryFile 常量")
 	}
 }

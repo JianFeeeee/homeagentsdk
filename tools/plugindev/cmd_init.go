@@ -7,8 +7,6 @@ import (
 	"sort"
 	"strings"
 	"text/template"
-
-	"gitcode.com/JianFeeeee/homeagent-sdk/meta"
 )
 
 func (p *PlgConfig) ReplacesToSlice() []string {
@@ -61,10 +59,6 @@ type TemplateData struct {
 	GoVersion  string
 	SDKModule  string
 	SDKVersion string
-
-	// C ABI
-	CABIVersion int
-	CABIHeader  string
 }
 
 func cmdInit(args []string) {
@@ -139,9 +133,7 @@ func cmdInit(args []string) {
 			Tags:        []string{name},
 			Targets:     targets,
 		},
-		IsLua:       isLua,
-		CABIVersion: meta.CABINum,
-		CABIHeader:  tmplCABIHeader,
+		IsLua: isLua,
 	}
 
 	// Detect SDK info for Go plugin go.mod.

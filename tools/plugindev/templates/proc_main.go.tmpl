@@ -19,7 +19,6 @@ import (
 	"log"
 	"os"
 	"sync"
-	"syscall"
 
 	sdk "gitcode.com/JianFeeeee/homeagent-sdk/sdk"
 )
@@ -96,7 +95,7 @@ var (
 
 	// 事件环（§3.6）：fd 4 = 事件环段 mmap，fd 5 = eventfd 读端
 	evtRingData []byte
-	evtfd       *os.File
+	evtNotifier evtWaiter
 	evtHandlers = map[uint32]func(*sdk.Event){}
 	evtHandlerMu sync.RWMutex
 )
@@ -1018,10 +1017,11 @@ func handleHandshake(req *rpcRequest) {
 		pluginName = p.PluginName
 	}
 
-	// fd 3 = 内核经 ExtraFiles 传入的共享段 memfd
+	// 挂载 StageContext 共享段。
+	// 传递机制按平台不同（Unix 用继承的 fd，Windows 用命名段），
+	// 由 z_proc_shm_*.go 承担——本文件保持平台无关。
 	if p.ShmSize > 0 {
-		m, err := syscall.Mmap(3, 0, p.ShmSize,
-			syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_SHARED)
+		m, err := attachStageShm(p.ShmSize)
 		if err != nil {
 			respondErr(req.ID, fmt.Errorf("挂载共享段失败: %w", err))
 			return
@@ -1033,20 +1033,24 @@ func handleHandshake(req *rpcRequest) {
 		shm = m
 	}
 
-	// 事件环：子进程经 fd 4 挂载事件环段，从 fd 5 的 eventfd 感知新事件
+	// 挂载事件环段 + 打开通知句柄（§3.6）
 	if p.EvtRingSize > 0 {
-		er, err := syscall.Mmap(4, 0, p.EvtRingSize,
-			syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_SHARED)
+		er, err := attachEvtRingShm(p.EvtRingSize)
 		if err != nil {
 			respondErr(req.ID, fmt.Errorf("挂载事件环段失败: %w", err))
 			return
 		}
-		if got := binary.LittleEndian.Uint32(er[evtOffMagic:evtOffMagic+4]); got != evtRingMagic {
+		if got := binary.LittleEndian.Uint32(er[evtOffMagic : evtOffMagic+4]); got != evtRingMagic {
 			respondErr(req.ID, fmt.Errorf("事件环魔数不匹配（0x%x）", got))
 			return
 		}
+		notifier, err := openEvtNotifier()
+		if err != nil {
+			respondErr(req.ID, fmt.Errorf("打开事件通知句柄失败: %w", err))
+			return
+		}
 		evtRingData = er
-		evtfd = os.NewFile(5, "eventfd")
+		evtNotifier = notifier
 		go evtConsumerLoop()
 	}
 
@@ -1218,14 +1222,14 @@ var evtTypeNames = [evtTypeMax]string{
 // evtConsumerLoop 是事件环消费主循环：eventfd.Read（阻塞走 netpoller）→ drain events → 分发。
 // 每个插件进程启动一个 goroutine，与 RPC 主循环并行。
 func evtConsumerLoop() {
-	if evtfd == nil || evtRingData == nil {
+	if evtNotifier == nil || evtRingData == nil {
 		return
 	}
 	buf := make([]byte, 8) // eventfd uint64 计数
 	var readSeq uint64
 
 	for {
-		if _, err := evtfd.Read(buf); err != nil {
+		if err := evtNotifier.Wait(buf); err != nil {
 			continue
 		}
 		// 循环 drain 直到无新事件（eventfd 计数合并，一次 Read 处理全部）
@@ -1274,4 +1278,14 @@ func evtConsumerLoop() {
 			readSeq++
 		}
 	}
+}
+
+// evtWaiter 抽象事件通知等待。
+//
+// Unix：eventfd（Linux）/ pipe（macOS）的读端，阻塞 Read 走 netpoller。
+// Windows：命名 Event 对象，WaitForSingleObject。
+// 平台实现在 z_proc_shm_unix.go / z_proc_shm_windows.go。
+type evtWaiter interface {
+	// Wait 阻塞直到有新事件；buf 供实现复用（Unix 读 8 字节计数）。
+	Wait(buf []byte) error
 }
