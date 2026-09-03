@@ -10,6 +10,11 @@ plugin.json
 build/
 dist/
 
+# plugindev 预编译二进制：只作为 release 附件分发，不进仓库历史。
+# 此前 5 个平台各 26-28MB 被 git 跟踪（约 137MB），每次重编都在历史里
+# 再叠一份，而它们本质是可从源码复现的产物。
+bin/
+
 # Test artifacts
 testdist/
 

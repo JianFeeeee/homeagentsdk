@@ -142,12 +142,20 @@ func New(name string, sett SettingsAPI, regTool ToolRegistrar, regStage StageReg
 
 ## plugindev 工具链
 
-`plugindev` 提供插件开发全流程支持。仓库 `bin/` 提供各平台预制二进制（linux/darwin/windows × amd64/arm64），下载后直接加入 PATH 即可：
+`plugindev` 提供插件开发全流程支持。预编译二进制作为 **release 附件**分发（linux/darwin/windows × amd64/arm64），从
+[Releases](https://gitcode.com/JianFeeeee/homeagent-sdk/releases) 下载后加入 PATH 即可：
 
 ```bash
-curl -o plugindev https://gitcode.com/JianFeeeee/homeagent-sdk/-/raw/main/bin/plugindev_linux_amd64
+# 从 release 附件下载（以 v1.0.0 / linux amd64 为例）
+curl -Lo plugindev https://gitcode.com/JianFeeeee/homeagent-sdk/releases/download/v1.0.0/plugindev_linux_amd64
 chmod +x plugindev
+
+# 或从源码自己编
+cd tools/plugindev && go build -o plugindev .
 ```
+
+> 二进制不再随仓库分发（旧的 `bin/` 目录已停用）：5 个平台各 26-28MB，
+> 每次重编都在 git 历史里再叠一份，而它们本质是可从源码复现的产物。
 
 | 命令 | 说明 |
 |------|------|
@@ -180,7 +188,7 @@ chmod +x plugindev
   "version": "1.0.0",
   "description": "天气查询插件",
   "author": "HomeAgent",
-  "entry": "plugin.so",
+  "entry": "plugin.bin",
   "tags": ["weather", "forecast"],
   "targets": "linux/amd64,windows/amd64",
   "outdir": "dist",
@@ -202,7 +210,7 @@ chmod +x plugindev
 | `version` | string | 版本号 |
 | `description` | string | 插件描述 |
 | `author` | string | 作者 |
-| `entry` | string | 入口文件（`plugin.so` / `plugin.dll` / `main.lua`） |
+| `entry` | string | 入口文件（`plugin.bin` / `main.lua`）。v1.0.0 起 Go 插件统一为 `plugin.bin`，不再区分平台后缀 |
 | `tags` | string[] | 标签 |
 | `targets` | string | 构建目标，逗号分隔（如 `linux/amd64,windows/amd64`，Lua 插件为 `lua`） |
 | `outdir` | string | 输出目录（默认 `dist`） |
@@ -217,10 +225,13 @@ chmod +x plugindev
 `.hmap` 为 ZIP 归档，包含：
 
 - `plugin.json` — 插件元数据
-- `plugin.so` — Go 编译产物（Linux）
-- `plugin.dll` — Go 编译产物（Windows）
-- `plugin.dylib` — Go 编译产物（macOS，bundle 模式）
+- `plugin.bin` — Go 编译产物（单平台构建）
+- `plugin.bin.<goos>.<goarch>` — 多平台 bundle 模式下每平台一份，
+  安装时 pluginmgr 挑当前平台那份重命名为 `plugin.bin`
 - `main.lua` — Lua 插件入口（Lua 插件时）
+
+> v1.0.0 起不再使用 `plugin.so`/`plugin.dll`/`plugin.dylib`——进程边界即 ABI 边界，
+> 不存在平台特定的动态库区分。旧产物新内核不会加载，会给出明确的重编提示。
 
 ## 插件生命周期
 

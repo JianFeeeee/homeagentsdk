@@ -142,14 +142,30 @@ Plugin developers only need to implement the `Plugin` interface and export a `Ne
 
 ## plugindev Toolchain
 
-`plugindev` provides full development workflow support:
+`plugindev` provides full development workflow support. Prebuilt binaries ship as **release assets**
+(linux/darwin/windows × amd64/arm64); download from
+[Releases](https://gitcode.com/JianFeeeee/homeagent-sdk/releases) and put it on your PATH:
+
+```bash
+# From release assets (v1.0.0 / linux amd64 shown)
+curl -Lo plugindev https://gitcode.com/JianFeeeee/homeagent-sdk/releases/download/v1.0.0/plugindev_linux_amd64
+chmod +x plugindev
+
+# Or build from source
+cd tools/plugindev && go build -o plugindev .
+```
+
+> Binaries no longer ship inside the repository (the old `bin/` directory is retired): five
+> platforms at 26-28MB each piled another copy into git history on every rebuild, and they are
+> reproducible from source anyway.
 
 | Command | Description |
 |---------|-------------|
-| `plugindev init` | Initialize plugin project (generates plg.json, entry template) |
-| `plugindev build` | Build plugin, output .hmap package |
-| `plugindev clean` | Clean build artifacts |
-| `plugindev debug` | Run plugin in local debug mode |
+| `plugindev init <name> [--lua]` | Initialize plugin project (generates plg.json, plugin.go or main.lua, go.mod, README.md) |
+| `plugindev build [flags]` | Build and package into a `.hmap` (supports cross-compilation and bundle mode) |
+| `plugindev clean` | Clean `build/` and `dist/` plus generated files |
+| `plugindev debug [dir]` | Load plugin source through the Yaegi Go interpreter and start an interactive REPL |
+| `plugindev sdk <command>` | SDK version management (list/install/use/path/current/latest) |
 
 Supports both **Go** and **Lua** plugin languages.
 
@@ -163,7 +179,7 @@ Supports both **Go** and **Lua** plugin languages.
   "version": "1.0.0",
   "description": "Weather plugin",
   "author": "HomeAgent",
-  "entry": "plugin.so",
+  "entry": "plugin.bin",
   "tags": ["weather", "forecast"],
   "targets": "linux/amd64,windows/amd64",
   "outdir": "dist",
@@ -185,7 +201,7 @@ Supports both **Go** and **Lua** plugin languages.
 | `version` | string | Version |
 | `description` | string | Plugin description |
 | `author` | string | Author |
-| `entry` | string | Entry file (`plugin.so` / `main.lua`) |
+| `entry` | string | Entry file (`plugin.bin` / `main.lua`). Since v1.0.0 Go plugins uniformly build to `plugin.bin`—no per-platform suffix |
 | `tags` | string[] | Tags |
 | `targets` | string | Build targets, comma-separated (e.g. `linux/amd64,windows/amd64`) |
 | `outdir` | string | Output directory (default `dist`) |
@@ -198,9 +214,14 @@ Supports both **Go** and **Lua** plugin languages.
 `.hmap` is a ZIP archive containing:
 
 - `plugin.json` — plugin metadata
-- `plugin.so` — Go compiled artifact (Linux)
-- `plugin.dll` — Go compiled artifact (Windows)
+- `plugin.bin` — Go compiled artifact (single-platform build)
+- `plugin.bin.<goos>.<goarch>` — one per platform in bundle mode; on install pluginmgr picks
+  the one matching the current platform and renames it to `plugin.bin`
 - `main.lua` — Lua plugin entry (for Lua plugins)
+
+> Since v1.0.0 `plugin.so`/`plugin.dll`/`plugin.dylib` are no longer used—the process boundary
+> *is* the ABI boundary, so there is no platform-specific shared-library distinction. The new
+> kernel will not load old artifacts; it emits an explicit rebuild hint instead.
 
 ## Plugin Lifecycle
 

@@ -73,18 +73,9 @@ func cmdBuild(args []string) {
 	// Ensure go.mod exists with correct SDK path
 	sdkModule := ensureGoMod(plg, sdkPath)
 
-	// First build: fetch the SDK module (generates go.sum with zip hash)
+	// 保证 SDK 模块可解析，否则编译必死在 "missing go.sum entry"。
 	if sdkModule != "" {
-		if _, err := os.Stat("go.sum"); os.IsNotExist(err) {
-			dl := exec.Command("go", "mod", "download", sdkModule)
-			dl.Env = os.Environ()
-			dl.Stdout = os.Stdout
-			dl.Stderr = os.Stderr
-			fmt.Println("  downloading SDK module deps...")
-			if err := dl.Run(); err != nil {
-				fmt.Printf("  error: go mod download: %v\n", err)
-			}
-		}
+		ensureSDKResolvable(plg, sdkModule, sdkPath)
 	}
 
 	// Merge plg.json replaces + CLI overrides
@@ -343,6 +334,128 @@ func ensureGoMod(plg *PlgConfig, sdkPath string) string {
 	return sdkModule
 }
 
+// ensureSDKResolvable 保证 SDK 模块在编译前可解析。
+//
+// 为何需要这个函数：gitcode 的模块不在 proxy.golang.org 上。只要 go.mod
+// 里的 SDK 靠 require 版本号解析，而本地又没 go.sum 条目，go build 就报
+// "missing go.sum entry"；而原来那句 `go mod download <mod>` 会去公共 proxy
+// 拉一个永远拉不到的条目，超时后只打一行 warn 就继继编译，紧接着死在
+// 同一个错误上——新用户拿到的是两段无关的报错。
+//
+// 三级策略，按代价递增：
+//  1. go.mod 已有指向本地目录的 replace —— 什么都不用做（replace 到目录时
+//     go 不需要也不校验 go.sum）。
+//  2. 能定位到本机 SDK 源码 —— 写入 replace。这是存量项目（go.mod 旧、
+//     无 replace）的救场路径。
+//  3. 都不行 —— 跑 `go mod tidy`（带 -mod=mod）让它自己去试，失败则给
+//     可操作的提示而不是让用户去猜。
+func ensureSDKResolvable(plg *PlgConfig, sdkModule, sdkPath string) {
+	data, err := os.ReadFile("go.mod")
+	if err != nil {
+		return
+	}
+
+	// 策略 1：已有指向本地目录的 replace。
+	// replace 目标带 / 或 . 开头的才是路径；指向另一个模块的 replace 不算。
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "replace ") || !strings.Contains(line, sdkModule) {
+			continue
+		}
+		parts := strings.Fields(line)
+		if len(parts) < 4 {
+			continue
+		}
+		target := parts[3]
+		if strings.HasPrefix(target, ".") || strings.HasPrefix(target, "/") ||
+			strings.Contains(target, ":/") || strings.Contains(target, ":\\") {
+			return // 已指向本地目录，无需 go.sum
+		}
+	}
+
+	// 策略 2：能定位到本机 SDK 就写 replace。
+	// resolveSDKPath 失败会 os.Exit，所以只在能确定拿到路径时调用它背后的探测。
+	if root := findLocalSDK(sdkPath); root != "" {
+		if appendGoModReplace(sdkModule, root) {
+			fmt.Printf("  SDK 指向本机源码（已写入 go.mod replace）：%s\n", root)
+			return
+		}
+	}
+
+	// 策略 3：交给 go mod tidy。
+	if _, err := os.Stat("go.sum"); err == nil {
+		return // 已有 go.sum，不插手
+	}
+	fmt.Println("  解析 SDK 依赖（go mod tidy）...")
+	tidy := exec.Command("go", "mod", "tidy")
+	tidy.Env = append(os.Environ(), "GOFLAGS=-mod=mod")
+	if out, err := tidy.CombinedOutput(); err != nil {
+		fmt.Printf("  warn: go mod tidy 失败：%v\n", err)
+		if len(out) > 0 {
+			fmt.Printf("  %s\n", strings.TrimSpace(string(out)))
+		}
+		fmt.Printf("  提示：%s 不在公共 proxy 上。用以下任一方式指向本机 SDK：\n", sdkModule)
+		fmt.Printf("    plugindev sdk install latest      # 装一份到 ~/.homeagent/plugindev/sdk\n")
+		fmt.Printf("    plugindev build --sdk-path <路径>  # 或直接指定源码目录\n")
+	}
+}
+
+// findLocalSDK 探测本机 SDK 源码根目录，找不到返回空串。
+//
+// 与 resolveSDKPath 的区别：后者找不到就 os.Exit，适合“必须有”的调用点；
+// 这里是“有则更好”的探测，不能把构建搞挂。
+func findLocalSDK(sdkPath string) string {
+	candidates := []string{}
+	if sdkPath != "" {
+		if abs, err := filepath.Abs(sdkPath); err == nil {
+			candidates = append(candidates, abs)
+		}
+	}
+	// plugindev 自身所在位置往上三级（tools/plugindev/plugindev → SDK 根）
+	if self, err := os.Executable(); err == nil {
+		candidates = append(candidates, filepath.Dir(filepath.Dir(filepath.Dir(self))))
+	}
+	// plugindev sdk use 选定的版本
+	store := os.Getenv("HOMEAGENT_SDK_DIR")
+	if store == "" {
+		if home, err := os.UserHomeDir(); err == nil {
+			store = filepath.Join(home, ".homeagent", "plugindev", "sdk")
+		}
+	}
+	if store != "" {
+		if d, err := os.ReadFile(filepath.Join(store, "current")); err == nil {
+			if ver := strings.TrimSpace(string(d)); ver != "" {
+				candidates = append(candidates, filepath.Join(store, ver))
+			}
+		}
+	}
+	for _, c := range candidates {
+		if c == "" {
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(c, "sdk", "plugin.go")); err == nil {
+			return c
+		}
+	}
+	return ""
+}
+
+// appendGoModReplace 向 go.mod 追加一条 replace，成功返回 true。
+func appendGoModReplace(module, localPath string) bool {
+	data, err := os.ReadFile("go.mod")
+	if err != nil {
+		return false
+	}
+	abs, err := filepath.Abs(localPath)
+	if err != nil {
+		return false
+	}
+	abs = strings.ReplaceAll(abs, "\\", "/")
+	s := strings.TrimRight(string(data), "\r\n")
+	s += fmt.Sprintf("\n\nreplace %s => %s\n", module, abs)
+	return os.WriteFile("go.mod", []byte(s), 0644) == nil
+}
+
 func resolveSDKPath(sdkPath string) string {
 	if sdkPath != "" {
 		abs, _ := filepath.Abs(sdkPath)
@@ -465,8 +578,8 @@ func buildTarget(plg *PlgConfig, target, outDir, sdkPath string) {
 }
 
 type binEntry struct {
-	src string // 磁盘路径，如 build/plugin.so
-	zip string // zip 中条目名，如 plugin.so
+	src string // 磁盘路径，如 build/plugin.bin
+	zip string // zip 中条目名，如 plugin.bin.linux.amd64
 }
 
 // createBundleHmap 创建包含多平台二进制的 bundle .hmap 文件。

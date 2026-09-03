@@ -19,7 +19,12 @@ const tmplGoMod = `module {{.ModulePath}}
 go {{.GoVersion}}
 
 require {{.SDKModule}} {{.SDKVersion}}
-`
+{{if .SDKLocalPath}}
+// SDK 指向本机源码。gitcode 的模块不在 proxy.golang.org 上，
+// 没有这条 replace 就需要 go.sum 条目，而那个条目无处可拉。
+// 若你已有可访问的私有 proxy，可删掉本行。
+replace {{.SDKModule}} => {{.SDKLocalPath}}
+{{end}}`
 
 const tmplPluginGo = `package main
 

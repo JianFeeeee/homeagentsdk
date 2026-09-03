@@ -59,6 +59,14 @@ type TemplateData struct {
 	GoVersion  string
 	SDKModule  string
 	SDKVersion string
+
+	// SDKLocalPath 是本机 SDK 源码绝对路径，写入生成的 go.mod 作为 replace 目标。
+	//
+	// 为何必须写：gitcode 的模块不在 proxy.golang.org 上，只 require 一个
+	// 版本号的 go.mod 配上缺失的 go.sum，新用户第一次 `plugindev build`
+	// 必定死在 "missing go.sum entry"，而 `go mod tidy` 又会去公共 proxy 拉
+	// 一个不存在的条目。有了本地 replace，go 完全不需要 go.sum 条目。
+	SDKLocalPath string
 }
 
 func cmdInit(args []string) {
@@ -109,7 +117,12 @@ func cmdInit(args []string) {
 		os.Exit(1)
 	}
 
-	entry := "plugin.so"
+	// Go 插件统一产出 plugin.bin（v1.0.0 子进程模式）。
+	//
+	// 此前这里写 "plugin.so"，scaffold 出来的 plg.json 就带着一个已退场的
+	// entry 值，新手跟着模板走会误以为自己在做 C ABI 插件。
+	// build 实际不看这个值（只用它区分 Lua），但模板不应误导。
+	entry := "plugin.bin"
 	var targets string
 	if isLua {
 		entry = "main.lua"
@@ -137,14 +150,15 @@ func cmdInit(args []string) {
 	}
 
 	// Detect SDK info for Go plugin go.mod.
-	// 生成的 go.mod 只 require SDK 线上模块版本，不写本地路径 replace；
-	// 本地调试请用 `plugindev build --sdk-path <path>` 或手动加 replace。
+	// 生成的 go.mod 除 require 外还写一条指向本机 SDK 的 replace：
+	// 否则 scaffold 出来的项目第一次 build 必定失败（详见 SDKLocalPath 注释）。
 	if !isLua {
-		sdkMod, goVer, _, sdkVer := detectSDKInfo()
+		sdkMod, goVer, sdkRoot, sdkVer := detectSDKInfo()
 		data.ModulePath = name
 		data.GoVersion = goVer
 		data.SDKModule = sdkMod
 		data.SDKVersion = "v" + sdkVer
+		data.SDKLocalPath = strings.ReplaceAll(sdkRoot, "\\", "/")
 	}
 
 	if err := os.MkdirAll(dir, 0755); err != nil {
