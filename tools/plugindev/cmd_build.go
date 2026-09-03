@@ -24,7 +24,8 @@ func cmdBuild(args []string) {
 	// Read all config from plg.json first
 	plg, err := readPlgJSON("plg.json")
 	if err != nil {
-		fmt.Printf("error: read plg.json: %v\n", err); os.Exit(1)
+		fmt.Printf("error: read plg.json: %v\n", err)
+		os.Exit(1)
 	}
 
 	// Base config from plg.json
@@ -39,11 +40,13 @@ func cmdBuild(args []string) {
 		switch args[i] {
 		case "--outdir":
 			if i+1 < len(args) {
-				outDir = args[i+1]; i++
+				outDir = args[i+1]
+				i++
 			}
 		case "--target":
 			if i+1 < len(args) {
-				targets = append(targets, args[i+1]); i++
+				targets = append(targets, args[i+1])
+				i++
 			}
 		case "--bundle":
 			bundle = true
@@ -51,11 +54,13 @@ func cmdBuild(args []string) {
 			bundle = false
 		case "--sdk-path":
 			if i+1 < len(args) {
-				sdkPath = args[i+1]; i++
+				sdkPath = args[i+1]
+				i++
 			}
 		case "--replace", "-R":
 			if i+1 < len(args) {
-				cliReplaces = append(cliReplaces, args[i+1]); i++
+				cliReplaces = append(cliReplaces, args[i+1])
+				i++
 			}
 		}
 	}
@@ -105,14 +110,17 @@ func cmdBuild(args []string) {
 }
 
 // allBundleTargets 是 --bundle 模式构建的全部平台。
-// 每个 OS 只有一个架构（amd64），避免二进制文件名冲突。
+//
+// 子进程模式下各平台产物同名（plugin.bin）——进程边界即 ABI 边界，
+// 不存在平台特有扩展名，故 zip 内按平台加后缀区分；
+// 内核安装时按当前平台挑对应条目重命名为 plugin.bin。
 var allBundleTargets = []struct {
 	target string
 	entry  string // 二进制在 zip 中的文件名
 }{
-	{"linux/amd64", "plugin.so"},
-	{"darwin/amd64", "plugin.dylib"},
-	{"windows/amd64", "plugin.dll"},
+	{"linux/amd64", "plugin.bin.linux.amd64"},
+	{"darwin/amd64", "plugin.bin.darwin.amd64"},
+	{"windows/amd64", "plugin.bin.windows.amd64"},
 }
 
 func buildBundle(plg *PlgConfig, outDir string, sdkPath string) {
@@ -120,9 +128,13 @@ func buildBundle(plg *PlgConfig, outDir string, sdkPath string) {
 	buildDir := "build"
 	os.MkdirAll(buildDir, 0755)
 
-	// Auto-generate C ABI bridge for non-Windows
-	bridgeCleanup := generateBridge("")
-	defer bridgeCleanup()
+	runtimeCleanup, err := generateProcRuntime()
+	if err != nil {
+		fmt.Printf("  error: %v\n", err)
+		return
+	}
+	defer runtimeCleanup()
+
 	thirdpartCleanup := linkThirdpart(plg, "linux/amd64")
 	defer thirdpartCleanup()
 
@@ -135,22 +147,18 @@ func buildBundle(plg *PlgConfig, outDir string, sdkPath string) {
 			return
 		}
 
-		outPath := filepath.Join(buildDir, cfg.entryFile)
+		// 每平台产物落到独立路径，避免相互覆盖
+		outName := fmt.Sprintf("%s_%s_%s", cfg.entryFile, cfg.goos, cfg.goarch)
+		outPath := filepath.Join(buildDir, outName)
 
-		cmd := exec.Command("go", "build", "-buildmode=c-shared", "-o", outPath)
+		// 零 cgo：跨平台交叉编译不需目标平台 C 工具链
+		cmd := exec.Command("go", "build", "-trimpath", "-o", outPath)
 		cmd.Env = os.Environ()
-		cmd.Env = append(cmd.Env, "GOOS="+cfg.goos, "GOARCH="+cfg.goarch, "CGO_ENABLED=1")
-
-		if cfg.goos == "windows" {
-			cc := detectWindowsCC()
-			if cc != "" {
-				cmd.Env = append(cmd.Env, "CC="+cc)
-			}
-		}
-
+		cmd.Env = append(cmd.Env, "GOOS="+cfg.goos, "GOARCH="+cfg.goarch, "CGO_ENABLED=0")
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
-		fmt.Printf("  compiling %s/%s (-buildmode=c-shared)...\n", cfg.goos, cfg.goarch)
+
+		fmt.Printf("  compiling %s/%s (子进程模式，CGO_ENABLED=0)...\n", cfg.goos, cfg.goarch)
 		if err := cmd.Run(); err != nil {
 			fmt.Printf("  error: build %s/%s: %v\n", cfg.goos, cfg.goarch, err)
 			return
@@ -168,7 +176,7 @@ func buildBundle(plg *PlgConfig, outDir string, sdkPath string) {
 	for p := range platforms {
 		plats = append(plats, p)
 	}
-	writePluginJSON(plg, plats, "plugin.so")
+	writePluginJSON(plg, plats, procEntryFile)
 
 	// package single .hmap with correctly named entries
 	hmapPath := filepath.Join(outDir, fmt.Sprintf("%s_bundle.hmap", toSnake(plg.NameEn)))
@@ -176,7 +184,10 @@ func buildBundle(plg *PlgConfig, outDir string, sdkPath string) {
 	fmt.Printf("  packaged %s\n", filepath.Base(hmapPath))
 }
 
-func (p *PlgConfig) IsLua() bool { return p.Entry == "main.lua" }
+// IsLua 判断是否为 Lua 插件（走解释器，不经过 Go 编译）。
+//
+// 这是 entry 字段唯一仍在使用的用途：Go 插件不再看 entry 值，一律产出 plugin.bin。
+func (p *PlgConfig) IsLua() bool { return p.Entry == luaEntryFile }
 
 func readPlgJSON(path string) (*PlgConfig, error) {
 	data, err := os.ReadFile(path)
@@ -228,9 +239,14 @@ func writePluginJSON(plg *PlgConfig, platforms []string, entry string) {
 type buildConfig struct {
 	goos      string
 	goarch    string
-	entryFile string // "plugin.so" or "plugin.dll"
+	entryFile string // 一律为 plugin.bin（进程边界即 ABI 边界，无平台特有扩展名）
 }
 
+// resolveBuild 解析目标平台。
+//
+// 全平台统一产出 plugin.bin：子进程模式下不存在 .so/.dylib/.dll 的区分，
+// 因为进程边界本身就是 ABI 边界——这正是三套独立 ABI 实现收敛为
+// 单一 RPC 实现的直接后果（§9.2：Windows 不再是能力退化的第三套实现）。
 func resolveBuild(target string) (*buildConfig, string) {
 	if target == "lua" || target == "" {
 		return nil, "lua"
@@ -245,14 +261,8 @@ func resolveBuild(target string) (*buildConfig, string) {
 	}
 
 	switch goos {
-	case "linux":
-		return &buildConfig{goos: goos, goarch: goarch, entryFile: "plugin.so"}, ""
-	case "darwin":
-		return &buildConfig{goos: goos, goarch: goarch, entryFile: "plugin.dylib"}, ""
-	case "freebsd":
-		return &buildConfig{goos: goos, goarch: goarch, entryFile: "plugin.so"}, ""
-	case "windows":
-		return &buildConfig{goos: goos, goarch: goarch, entryFile: "plugin.dll"}, ""
+	case "linux", "darwin", "freebsd", "windows":
+		return &buildConfig{goos: goos, goarch: goarch, entryFile: procEntryFile}, ""
 	default:
 		return nil, fmt.Sprintf("unsupported OS %q", goos)
 	}
@@ -403,7 +413,7 @@ func buildTarget(plg *PlgConfig, target, outDir, sdkPath string) {
 		return
 	}
 
-	// Resolve build config
+	// Resolve build config（全平台统一产出 plugin.bin）
 	cfg, errMsg := resolveBuild(target)
 	if cfg == nil {
 		fmt.Printf("  error: %s\n", errMsg)
@@ -414,9 +424,12 @@ func buildTarget(plg *PlgConfig, target, outDir, sdkPath string) {
 	os.MkdirAll(buildDir, 0755)
 	outPath := filepath.Join(buildDir, cfg.entryFile)
 
-	// Auto-generate C ABI bridge (all platforms use c-shared)
-	bridgeCleanup := generateBridge(cfg.goos)
-	defer bridgeCleanup()
+	runtimeCleanup, err := generateProcRuntime()
+	if err != nil {
+		fmt.Printf("  error: %v\n", err)
+		return
+	}
+	defer runtimeCleanup()
 
 	// Auto-link thirdpart/ contents + source_dirs + replace targets
 	thirdpartCleanup := linkThirdpart(plg, target)
@@ -425,28 +438,15 @@ func buildTarget(plg *PlgConfig, target, outDir, sdkPath string) {
 	// Write plugin.json with the correct entry for this target
 	writePluginJSON(plg, nil, cfg.entryFile)
 
-	cmd := exec.Command("go", "build", "-buildmode=c-shared", "-o", outPath)
+	// 普通 go build + 零 cgo：交叉编译不再需要目标平台的 C 工具链
+	// （旧路径靠 detectWindowsCC 找 MinGW，现在整个问题消失）。
+	cmd := exec.Command("go", "build", "-trimpath", "-o", outPath)
 	cmd.Env = os.Environ()
-	cmd.Env = append(cmd.Env, "GOOS="+cfg.goos, "GOARCH="+cfg.goarch, "CGO_ENABLED=1")
-
-	// Auto-detect MinGW gcc on Windows
-	if cfg.goos == "windows" {
-		cc := detectWindowsCC()
-		if cc != "" {
-			cmd.Env = append(cmd.Env, "CC="+cc)
-		}
-	}
-
+	cmd.Env = append(cmd.Env, "GOOS="+cfg.goos, "GOARCH="+cfg.goarch, "CGO_ENABLED=0")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
-	// DEBUG: list files before building
-	entries, _ := os.ReadDir(".")
-	for _, e := range entries {
-		fmt.Printf("  [DEBUG] file: %s\n", e.Name())
-	}
-
-	fmt.Printf("  compiling %s/%s (-buildmode=c-shared)...\n", cfg.goos, cfg.goarch)
+	fmt.Printf("  compiling %s/%s (子进程模式，CGO_ENABLED=0)...\n", cfg.goos, cfg.goarch)
 	if err := cmd.Run(); err != nil {
 		fmt.Printf("  error: build %s/%s: %v\n", cfg.goos, cfg.goarch, err)
 		return
@@ -566,72 +566,8 @@ func toSnake(s string) string {
 	return strings.ToLower(strings.ReplaceAll(s, " ", "_"))
 }
 
-// detectWindowsCC looks for a MinGW-w64 gcc on Windows for c-shared builds.
-func detectWindowsCC() string {
-	// Check CC from environment first
-	if cc := os.Getenv("CC"); cc != "" {
-		if _, err := exec.LookPath(cc); err == nil {
-			return cc
-		}
-	}
-	// Check common MinGW install paths
-	candidates := []string{
-		"C:\\mingw64\\bin\\gcc.exe",
-		"C:\\MinGW\\bin\\gcc.exe",
-		"C:\\msys64\\mingw64\\bin\\gcc.exe",
-		"C:\\Users\\21989\\AppData\\Local\\Temp\\mingw64\\mingw64\\bin\\gcc.exe",
-	}
-	// Also search PATH for gcc
-	if path, err := exec.LookPath("gcc"); err == nil {
-		return path
-	}
-	for _, c := range candidates {
-		if _, err := os.Stat(c); err == nil {
-			return c
-		}
-	}
-	return ""
-}
-
 // stripIncludeGuard strips preprocessor guards and C++ comments from a C header,
 // since these can confuse cgo's type resolution.
-// generateBridge generates the C ABI bridge files for non-Lua builds.
-// Returns a cleanup function to remove generated files.
-func generateBridge(goos string) func() {
-	const bridgeFile = "z_bridge_gen.go"
-	const cEntryFile = "z_entry.c"
-	os.Remove(bridgeFile)
-	os.Remove(cEntryFile)
-
-	var files []string
-
-	if goos == "windows" {
-		if err := os.WriteFile(bridgeFile, []byte(tmplBridge), 0644); err != nil {
-			fmt.Printf("  error: write bridge: %v\n", err)
-			return func() {}
-		}
-		files = append(files, bridgeFile)
-	} else {
-		if err := os.WriteFile(bridgeFile, []byte(tmplLinuxBridge), 0644); err != nil {
-			fmt.Printf("  error: write bridge: %v\n", err)
-			return func() {}
-		}
-		files = append(files, bridgeFile)
-		// Write C entry point file
-		if err := os.WriteFile(cEntryFile, []byte(tmplPluginInitC), 0644); err != nil {
-			fmt.Printf("  error: write C entry: %v\n", err)
-			return func() {}
-		}
-		files = append(files, cEntryFile)
-	}
-
-	return func() {
-		for _, f := range files {
-			os.Remove(f)
-		}
-	}
-}
-
 // linkThirdpart scans thirdpart/, source_dirs from plg.json, and replace target dirs
 // for source files, generating auto-import stubs. Returns cleanup function.
 func linkThirdpart(plg *PlgConfig, target string) func() {
