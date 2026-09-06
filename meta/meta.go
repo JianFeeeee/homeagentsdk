@@ -30,7 +30,10 @@ var (
 	//
 	// ❗main 分支上此值是**下一个未发布中版本**；已发布的值看对应的
 	// release/vX.Y.x 分支与 tag（见 核心仓 docs/git-branching.md §2.1 与 §七.1）。
-	Version = "1.0.0"
+	//
+	// 现为 1.2.0：1.1.x 线正在发布中（release/v1.1.x 上定版 1.1.0），
+	// main 在积攒 1.2 的东西。1.2.0 本身还没有任何 tag。
+	Version = "1.2.0"
 
 	// Commit 是构建时的 Git commit hash。
 	Commit = "unknown"
