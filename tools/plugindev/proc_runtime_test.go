@@ -95,12 +95,17 @@ func TestProcTemplate_CoversAllCoreMethods(t *testing.T) {
 		// IO 注入
 		"io.injectText", "io.injectInterrupt", "io.injectTextNoMem", "io.injectInputSync",
 		"io.setToolBlocks",
+		// 多模态注入（1.1.0 新增）。漏接线的后果是插件调 InjectInputMedia 静默无效果：
+		// 模板不发这个 RPC，内核也就永远收不到，而两边都不报错。
+		"io.injectMedia", "io.injectMediaSync", "io.injectInterruptMedia",
 		// 生命周期
 		"lifecycle.autoRestart",
 		// 图记忆
 		"memory.recall", "memory.commit", "memory.introspect", "memory.merge", "memory.purge",
 		// 文档记忆
 		"doc.query", "doc.insert", "doc.remove", "doc.stats",
+		// 文档媒体（1.1.0 新增）
+		"doc.insertWithMedia",
 		// 知识库
 		"knowledge.search", "knowledge.add", "knowledge.list",
 		// 文本记忆

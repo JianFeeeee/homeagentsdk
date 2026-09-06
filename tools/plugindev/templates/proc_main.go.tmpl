@@ -490,6 +490,34 @@ func (procIO) SetToolBlocks(blocks []sdk.ContentBlock) {
 	}
 }
 
+// 带媒体的注入：插件主动发起一轮带图/音频的对话。
+// 与 SetToolBlocks 的区别是媒体在**本轮**就到模型手上，而不是等下一条 tool message。
+func (procIO) InjectInputMedia(s, c, t string, blocks []sdk.ContentBlock) {
+	callCoreVoid("io.injectMedia", map[string]interface{}{
+		"source": s, "channel": c, "text": t, "blocks": blocks,
+	})
+}
+
+func (procIO) InjectInputMediaSync(s, c, t string, blocks []sdk.ContentBlock) string {
+	raw, err := callCore("io.injectMediaSync", map[string]interface{}{
+		"source": s, "channel": c, "text": t, "blocks": blocks,
+	})
+	if err != nil {
+		return ""
+	}
+	var r struct {
+		Reply string `json:"reply"`
+	}
+	json.Unmarshal(raw, &r)
+	return r.Reply
+}
+
+func (procIO) InjectInterruptMedia(s, c, t string, blocks []sdk.ContentBlock) {
+	callCoreVoid("io.injectInterruptMedia", map[string]interface{}{
+		"source": s, "channel": c, "text": t, "blocks": blocks,
+	})
+}
+
 type procMemory struct{}
 
 func (procMemory) Recall(q []string, d int) ([]sdk.Entity, []sdk.Relation, error) {
@@ -556,6 +584,26 @@ func (procDocMemory) Query(text string, topK int) []*sdk.Doc {
 }
 func (procDocMemory) Insert(d *sdk.Doc) error {
 	return callCoreVoid("doc.insert", map[string]interface{}{"doc": d})
+}
+
+// InsertWithMedia 写入文档并关联媒体。
+//
+// 内核会把 `[mime <短digest>] <描述>` 标记补进 Content 并挂上引用，回传的
+// doc 带着补好的 Content/ID/MediaDigests——回写进 d 让调用方能拿到这些。
+func (procDocMemory) InsertWithMedia(d *sdk.Doc, atts []sdk.MediaAttachment) error {
+	raw, err := callCore("doc.insertWithMedia", map[string]interface{}{
+		"doc": d, "attachments": atts,
+	})
+	if err != nil {
+		return err
+	}
+	var r struct {
+		Doc *sdk.Doc `json:"doc"`
+	}
+	if json.Unmarshal(raw, &r) == nil && r.Doc != nil {
+		*d = *r.Doc
+	}
+	return nil
 }
 func (procDocMemory) Remove(id string) {
 	callCoreVoid("doc.remove", map[string]string{"id": id})

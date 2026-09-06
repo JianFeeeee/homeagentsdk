@@ -36,6 +36,7 @@ type Plugin interface {
 | 设置 | `Settings()` | 访问设置 API |
 | 事件 | `Events()` | 访问事件订阅器（外部插件仅订阅） |
 | 注入 | `InjectText(source, channel, text)` / `InjectInterruptText(source, channel, text)` / `InjectTextNoMemory(source, channel, text)` | 向管道注入文本 |
+| 多模态注入 | `InjectInputMedia(source, channel, text, blocks)` / `InjectInputMediaSync(...)` / `InjectInterruptMedia(...)` | 注入带图片/音频的输入（1.1.0 新增） |
 | 自动重启 | `SetAutoRestart(enabled)` / `AutoRestart()` | 控制崩溃自动重启 |
 
 ### 阶段钩子
@@ -106,6 +107,30 @@ type 枚举值：
 | `InjectInterruptText(source, channel, text)` | 注入中断文本，打断当前处理，路由到指定通道 |
 | `InjectTextNoMemory(source, channel, text)` | 注入文本，不记入内存，路由到指定通道 |
 
+### 多模态注入（1.1.0 新增）
+
+| 方法 | 说明 |
+|------|------|
+| `InjectInputMedia(source, channel, text, blocks)` | 注入带媒体的输入，异步 |
+| `InjectInputMediaSync(source, channel, text, blocks)` | 注入带媒体的输入并同步等待回复文本 |
+| `InjectInterruptMedia(source, channel, text, blocks)` | 注入带媒体的中断，可抢占当前处理 |
+
+`blocks` 是 `[]sdk.ContentBlock`，与 `SetToolBlocks` 用同一类型：
+
+```go
+s.InjectInputMedia("myplugin", "webui", "帮我看看这张图", []sdk.ContentBlock{{
+    Type:     "image_url",
+    ImageURL: &sdk.ImageURL{URL: "data:image/png;base64," + b64, Detail: "auto"},
+}})
+```
+
+与 `SetToolBlocks` 的区别：`SetToolBlocks` 只能在工具处理函数内部调用，媒体要等到
+下一条 tool message 才到模型手上；这三个方法是插件**主动发起一轮带媒体的对话**，
+媒体在本轮就随消息发给模型，并自动落进媒体存储、挂上媒体记忆引用。
+
+媒体块里的 `data:` URL 会被内核落盘去重；`http(s)` URL 只透传给模型，不入库
+（入库需要内核发起网络请求，涉及超时、鉴权与 SSRF）。
+
 `source` 标识来源，`channel` 指定目标输出通道。
 
 ### Triple 扩展字段
@@ -115,6 +140,61 @@ Triple 数据结构新增字段：
 - `Confidence` — 置信度（0.0~1.0）
 - `SubjectType` — 主体类型
 - `ObjectType` — 客体类型
+- `SentenceText` — 原始句子文本（1.1.0 新增），写入 `sentences` 表；媒体引用挂在句子上
+- `MediaDigests` — 关联的媒体 digest 列表（1.1.0 新增）
+
+### 记忆里的媒体（1.1.0 新增）
+
+媒体在纯文本记忆里以**标记**形式存在，格式 `[<mime> <短digest>] <描述>`：
+
+```
+[image/png a1b2c3d4e5f6] 一张紫蓝红三色带图
+```
+
+描述文本是持久的语义记忆（检索靠它），digest 是回到字节的钥匙（反查靠它）。
+标记由内核生成，插件不必自己拼——**填 digest 就够**。
+
+#### 图记忆
+
+```go
+s.Memory().Commit([]sdk.Triple{{
+    Subject: "配色图", Relation: "包含", Object: "三色带",
+    MediaDigests: []string{"a1b2c3d4e5f6"}, // 短 digest 即可，内核补全
+}})
+```
+
+没给 `SentenceText` 时内核会用标记本身充当句子——媒体必须有句子落点，
+否则引用无从挂起。
+
+#### 知识库
+
+```go
+s.DocMemory().InsertWithMedia(&sdk.Doc{
+    Title:   "带图笔记",
+    Content: "正文",
+}, []sdk.MediaAttachment{
+    {MIME: "image/png", Data: pngBytes, Name: "chart.png"}, // 新内容，落盘去重
+    {Digest: "a1b2c3d4e5f6"},                               // 引用已有内容
+})
+```
+
+`Insert` 保持原签名不变，正文里已有的标记同样会被挂成文档级引用。
+`Query` 返回的 `Doc` 带 `MediaDigests` 与 `Attachments`（mime + 描述，
+**不含字节**——一次检索可能命中几十份媒体）。删除文档时引用自动释放。
+
+#### 文本记忆
+
+```go
+s.TextMemory().Append(sdk.TextEvent{
+    Role: "user", Content: "看这张图",
+    Attachments: []sdk.MediaAttachment{{MIME: "image/png", Data: pngBytes}},
+})
+```
+
+`RecentEvents` 读回时正文里的标记会被反解成 `Attachments`。
+
+媒体存储可在内核侧关闭（`core.memory.media.enabled=false`），此时以上接口
+全部退化为纯文本行为：不报错、不 panic，与本特性上线前一致。
 
 ### ToolDef 字段说明
 
