@@ -95,6 +95,29 @@ type IOInjector interface {
 	InjectInterruptText(source, channel, text string)
 	InjectText(source, channel, text string)
 	InjectTextNoMemory(source, channel, text string)
+	// 1.1.0 媒体注入。与公共 SDK 同构：插件在 yaegi 下调得通的方法，
+	// 编成 plugin.bin 后必须也调得通，否则调试期与真实运行行为不一致。
+	InjectInputMedia(source, channel, text string, blocks []ContentBlock)
+	InjectInputMediaSync(source, channel, text string, blocks []ContentBlock) string
+	InjectInterruptMedia(source, channel, text string, blocks []ContentBlock)
+	SetToolBlocks(blocks []ContentBlock)
+}
+
+// ContentBlock 与公共 SDK 同构（OpenAI 多模态内容块格式）。
+type ContentBlock struct {
+	Type     string    `json:"type"`
+	Text     string    `json:"text,omitempty"`
+	ImageURL *ImageURL `json:"image_url,omitempty"`
+	AudioURL *AudioURL `json:"audio_url,omitempty"`
+}
+
+type ImageURL struct {
+	URL    string `json:"url"`
+	Detail string `json:"detail,omitempty"`
+}
+
+type AudioURL struct {
+	URL string `json:"url"`
 }
 
 type EventType string
@@ -159,29 +182,33 @@ type mockSettings struct{ data map[string]interface{} }
 
 func (s *mockSettings) Get(key string) (interface{}, error) {
 	v, ok := s.data[key]
-	if !ok { return nil, nil }
+	if !ok {
+		return nil, nil
+	}
 	return v, nil
 }
 func (s *mockSettings) Set(key string, value interface{}) error { s.data[key] = value; return nil }
 func (s *mockSettings) List(prefix string) ([]string, error) {
 	var ks []string
 	for k := range s.data {
-		if strings.HasPrefix(k, prefix) { ks = append(ks, k) }
+		if strings.HasPrefix(k, prefix) {
+			ks = append(ks, k)
+		}
 	}
 	return ks, nil
 }
-func (s *mockSettings) GetCore(key string) (interface{}, error) { return nil, nil }
-func (s *mockSettings) SetCore(key string, value interface{}) error { return nil }
-func (s *mockSettings) ListCore(prefix string) ([]string, error) { return nil, nil }
-func (s *mockSettings) GetPlugin(p, k string) (interface{}, error) { return nil, nil }
-func (s *mockSettings) SetPlugin(p, k string, v interface{}) error { return nil }
+func (s *mockSettings) GetCore(key string) (interface{}, error)       { return nil, nil }
+func (s *mockSettings) SetCore(key string, value interface{}) error   { return nil }
+func (s *mockSettings) ListCore(prefix string) ([]string, error)      { return nil, nil }
+func (s *mockSettings) GetPlugin(p, k string) (interface{}, error)    { return nil, nil }
+func (s *mockSettings) SetPlugin(p, k string, v interface{}) error    { return nil }
 func (s *mockSettings) ListPlugin(p, prefix string) ([]string, error) { return nil, nil }
 func (s *mockSettings) RegisterDef(def ConfigDef) {
 	logf("config def: %s = %s", def.Key, def.Default)
 }
 func (s *mockSettings) Defs(prefix string) []*ConfigDef { return nil }
-func (s *mockSettings) Dump() map[string]interface{} { return s.data }
-func (s *mockSettings) Plugins() []string { return nil }
+func (s *mockSettings) Dump() map[string]interface{}    { return s.data }
+func (s *mockSettings) Plugins() []string               { return nil }
 
 type Entity struct {
 	Name       string            `json:"name"`
@@ -195,10 +222,21 @@ type Relation struct {
 	Object    string `json:"object"`
 }
 
+// Triple 与公共 SDK 同构。
+//
+// ❗字段名曾是 `Predicate`，而公共 SDK 一直叫 `Relation`。
+// yaegi 解释器下插件写 `Relation:` 会报未知字段，写 `Predicate:` 则在
+// 编成 plugin.bin 时报错——谁都不对。没人发现是因为没有任何代码
+// 对着 mocksdk 编译，漂移不会被编译器抓到。
 type Triple struct {
-	Subject   string `json:"subject"`
-	Predicate string `json:"predicate"`
-	Object    string `json:"object"`
+	Subject      string   `json:"subject"`
+	Relation     string   `json:"relation"`
+	Object       string   `json:"object"`
+	Confidence   float64  `json:"confidence,omitempty"`
+	SubjectType  string   `json:"subject_type,omitempty"`
+	ObjectType   string   `json:"object_type,omitempty"`
+	SentenceText string   `json:"sentence_text,omitempty"`
+	MediaDigests []string `json:"media_digests,omitempty"`
 }
 
 type MemoryAPI interface {
@@ -212,37 +250,57 @@ type MemoryAPI interface {
 type mockMemory struct{}
 
 func (mockMemory) Recall(q []string, d int) ([]Entity, []Relation, error) { return nil, nil, nil }
-func (mockMemory) Commit(t []Triple) error                                  { return nil }
-func (mockMemory) Introspect() (map[string]interface{}, error)              { return map[string]interface{}{}, nil }
-func (mockMemory) MergeEntities(s, t string) (int, error)                   { return 0, nil }
-func (mockMemory) Purge(c map[string]string, m string) (int, error)         { return 0, nil }
+func (mockMemory) Commit(t []Triple) error                                { return nil }
+func (mockMemory) Introspect() (map[string]interface{}, error)            { return map[string]interface{}{}, nil }
+func (mockMemory) MergeEntities(s, t string) (int, error)                 { return 0, nil }
+func (mockMemory) Purge(c map[string]string, m string) (int, error)       { return 0, nil }
 
 type Doc struct {
 	ID      string `json:"id"`
 	Title   string `json:"title"`
 	Content string `json:"content"`
 	Source  string `json:"source"`
+	// 1.1.0：媒体字段。与公共 SDK 保持同构，否则插件在 yaegi 下跑得通、
+	// 编成 plugin.bin 却编不过（或反之）。
+	MediaDigests []string          `json:"media_digests,omitempty"`
+	Attachments  []MediaAttachment `json:"attachments,omitempty"`
+}
+
+// MediaAttachment 与公共 SDK 同构：写入时给 Data+MIME，引用已有内容时只给 Digest。
+type MediaAttachment struct {
+	Digest      string `json:"digest,omitempty"`
+	MIME        string `json:"mime,omitempty"`
+	Data        []byte `json:"data,omitempty"`
+	Name        string `json:"name,omitempty"`
+	Description string `json:"description,omitempty"`
 }
 
 type DocMemoryAPI interface {
 	Query(text string, topK int) []*Doc
 	Insert(doc *Doc) error
+	InsertWithMedia(doc *Doc, attachments []MediaAttachment) error
 	Remove(id string)
 	Stats() map[string]interface{}
 }
 
 type mockDocMemory struct{}
 
-func (mockDocMemory) Query(t string, k int) []*Doc       { return nil }
-func (mockDocMemory) Insert(doc *Doc) error               { return nil }
-func (mockDocMemory) Remove(id string)                    {}
-func (mockDocMemory) Stats() map[string]interface{}       { return nil }
+func (mockDocMemory) Query(t string, k int) []*Doc { return nil }
+func (mockDocMemory) Insert(doc *Doc) error        { return nil }
+func (mockDocMemory) InsertWithMedia(doc *Doc, atts []MediaAttachment) error {
+	logf("doc_insert_with_media: %d 份附件", len(atts))
+	return nil
+}
+func (mockDocMemory) Remove(id string)              {}
+func (mockDocMemory) Stats() map[string]interface{} { return nil }
 
 type TextEvent struct {
 	Timestamp int64  `json:"timestamp"`
 	Role      string `json:"role"`
 	Content   string `json:"content"`
 	Source    string `json:"source"`
+	// 1.1.0：附件。读回时内核从正文标记反解，写入时内核把标记并进正文。
+	Attachments []MediaAttachment `json:"attachments,omitempty"`
 }
 
 type TextMemoryAPI interface {
@@ -305,8 +363,8 @@ type LLMAPI interface {
 type mockLLM struct{}
 
 func (mockLLM) ListSources() []string    { return nil }
-func (mockLLM) SetSource(n string) error  { return nil }
-func (mockLLM) CurrentSource() string     { return "" }
+func (mockLLM) SetSource(n string) error { return nil }
+func (mockLLM) CurrentSource() string    { return "" }
 
 type IOInjectorImpl struct{}
 
@@ -319,27 +377,40 @@ func (IOInjectorImpl) InjectText(source, channel, text string) {
 func (IOInjectorImpl) InjectTextNoMemory(source, channel, text string) {
 	logf("inject_text_no_memory: source=%s channel=%s", source, channel)
 }
+func (IOInjectorImpl) InjectInputMedia(source, channel, text string, blocks []ContentBlock) {
+	logf("inject_input_media: source=%s channel=%s blocks=%d", source, channel, len(blocks))
+}
+func (IOInjectorImpl) InjectInputMediaSync(source, channel, text string, blocks []ContentBlock) string {
+	logf("inject_input_media_sync: source=%s channel=%s blocks=%d", source, channel, len(blocks))
+	return ""
+}
+func (IOInjectorImpl) InjectInterruptMedia(source, channel, text string, blocks []ContentBlock) {
+	logf("inject_interrupt_media: source=%s channel=%s blocks=%d", source, channel, len(blocks))
+}
+func (IOInjectorImpl) SetToolBlocks(blocks []ContentBlock) {
+	logf("set_tool_blocks: blocks=%d", len(blocks))
+}
 
 type PluginSDK struct {
-	Name        string
-	mu          sync.RWMutex
-	toolDefs    map[string]ToolDef
-	toolHandlers map[string]ToolHandler
+	Name          string
+	mu            sync.RWMutex
+	toolDefs      map[string]ToolDef
+	toolHandlers  map[string]ToolHandler
 	stageHandlers map[string]StageHandler
-	outChannels  map[string]ToolHandler
-	Settings     SettingsAPI
-	IO           IOInjector
+	outChannels   map[string]ToolHandler
+	Settings      SettingsAPI
+	IO            IOInjector
 }
 
 func New(name string) *PluginSDK {
 	return &PluginSDK{
-		Name:         name,
-		toolDefs:     make(map[string]ToolDef),
-		toolHandlers: make(map[string]ToolHandler),
+		Name:          name,
+		toolDefs:      make(map[string]ToolDef),
+		toolHandlers:  make(map[string]ToolHandler),
 		stageHandlers: make(map[string]StageHandler),
-		outChannels:  make(map[string]ToolHandler),
-		Settings:     &mockSettings{data: map[string]interface{}{}},
-		IO:           IOInjectorImpl{},
+		outChannels:   make(map[string]ToolHandler),
+		Settings:      &mockSettings{data: map[string]interface{}{}},
+		IO:            IOInjectorImpl{},
 	}
 }
 
