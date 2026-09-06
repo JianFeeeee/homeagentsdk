@@ -2,6 +2,26 @@
 
 HomeAgent 插件开发 SDK，用于构建与 HomeAgent 平台交互的智能插件。
 
+## 版本与兼容性
+
+当前：**SDK 1.1.0**（需要内核 **1.1.1+** 才能用媒体接口；媒体之外的能力内核 1.0.0 即可）。
+
+**版本号跟随内核的中版本，patch 位恒为 `.0`**：
+
+| 内核版本 | 对应 SDK |
+|---|---|
+| 1.0.0 / 1.0.1 / … / 1.0.4 | 1.0.0 |
+| 1.1.0 / 1.1.1 / … / 1.1.N | **1.1.0** |
+| 1.2.0 起 | 1.2.0 |
+
+内核的 patch 位专用于 bugfix 与漏洞修复，不碰公开接口，所以 SDK 版本号不跟着动——
+否则你要么被迫跟版、要么怀疑自己版本过时，而接口其实一个字都没变。
+
+**1.0.x 插件升到 1.1.x：不需要改代码，也不需要重编。** 1.1.0 的新增全部是
+「插件调用、内核实现」方向，不调就不受影响（已用 SDK 0.9.2 编的旧 `plugin.bin`
+实测验证：在新内核上直接建链通过，因为握手校验的是 `ProtocolVersion`、不是 SDK 版本）。
+想用新字段时重编即可。
+
 ## SDK API 接口
 
 ### Plugin 接口
@@ -226,8 +246,8 @@ func New(name string, sett SettingsAPI, regTool ToolRegistrar, regStage StageReg
 [Releases](https://gitcode.com/JianFeeeee/homeagent-sdk/releases) 下载后加入 PATH 即可：
 
 ```bash
-# 从 release 附件下载（以 v1.0.0 / linux amd64 为例）
-curl -Lo plugindev https://gitcode.com/JianFeeeee/homeagent-sdk/releases/download/v1.0.0/plugindev_linux_amd64
+# 从 release 附件下载（以 v1.1.0 / linux amd64 为例）
+curl -Lo plugindev https://gitcode.com/JianFeeeee/homeagent-sdk/releases/download/v1.1.0/plugindev_linux_amd64
 chmod +x plugindev
 
 # 或从源码自己编
@@ -367,6 +387,31 @@ enabled := sdk.AutoRestart()
 ```
 
 插件崩溃时平台自动拉起，保障服务可用性。
+
+> ⚠️ `SetAutoRestart` 的典型用法是「外部连接建好后再判定能否自动重启」，而连接建立
+> 通常在后台 goroutine 里，内核又在另一个 goroutine 读它——这对读写天然并发。
+> **SDK 1.1.0 已给这个标志与全部 API 字段加锁**（`-race` 实测 11 处竞态，
+> 生产表现是插件重载瞬间偶发 nil 解引用崩溃）。早于 1.1.0 的版本建议升级。
+
+## 插件开发者的并发约定
+
+`PluginSDK` 是**被多个 goroutine 同时使用的共享对象**：你在 `Start()` 里起的轮询、
+监听、定时器都拿着同一份 `*PluginSDK` 往里注消息，而内核会在加载/重载时写它的
+ API 字段。因此：
+
+- **SDK 侧已保证的**：全部 API 访问器（`Memory()`/`DocMemory()`/…）、全部注入方法、
+  `SetAutoRestart`/`AutoRestart`、`RegisterTool`/`RegisterStage`、
+  `RunStopHandlers`/`RunOnRemoveHandlers`（幂等，并发调也只执行一次）。
+- **你需要自己保证的**：`StageContext` 的字段全部导出，并发读写必须自己持
+  `ctx.Lock()`/`ctx.RLock()`。尤其是 `ctx.Extra`——**map 的并发写在 Go 里是直接 fatal，
+  `recover` 接不住**。
+
+```go
+ctx.Lock()
+ctx.Extra["mykey"] = value
+ctx.FinalText += "补充说明"
+ctx.Unlock()
+```
 
 ## 受限 SDK vs 完整 SDK
 

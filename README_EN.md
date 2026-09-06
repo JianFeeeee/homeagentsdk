@@ -2,6 +2,29 @@
 
 Plugin development SDK for building intelligent plugins that interact with the HomeAgent platform.
 
+## Version and Compatibility
+
+Current: **SDK 1.1.0** (the media APIs need kernel **1.1.1+**; everything else works on kernel 1.0.0).
+
+**The version tracks the kernel's minor version, with the patch position pinned at `.0`**:
+
+| Kernel version | Matching SDK |
+|---|---|
+| 1.0.0 / 1.0.1 / … / 1.0.4 | 1.0.0 |
+| 1.1.0 / 1.1.1 / … / 1.1.N | **1.1.0** |
+| 1.2.0 onward | 1.2.0 |
+
+The kernel's patch position is reserved for bugfixes and vulnerability fixes, which never touch the
+public interface, so the SDK version has no reason to move with it — otherwise you would either be
+forced to chase releases or suspect your version is stale, when not one character of the interface
+has changed.
+
+**Upgrading a 1.0.x plugin to 1.1.x: no code changes, no rebuild.** Everything added in 1.1.0 is
+in the "plugin calls, kernel implements" direction, so not calling it means not being affected
+(verified with an old `plugin.bin` built against SDK 0.9.2: it handshakes fine on the new kernel,
+because the handshake validates `ProtocolVersion`, not the SDK version). Rebuild only when you want
+the new fields.
+
 ## SDK API Surface
 
 ### Plugin Interface
@@ -233,8 +256,8 @@ Plugin developers only need to implement the `Plugin` interface and export a `Ne
 [Releases](https://gitcode.com/JianFeeeee/homeagent-sdk/releases) and put it on your PATH:
 
 ```bash
-# From release assets (v1.0.0 / linux amd64 shown)
-curl -Lo plugindev https://gitcode.com/JianFeeeee/homeagent-sdk/releases/download/v1.0.0/plugindev_linux_amd64
+# From release assets (v1.1.0 / linux amd64 shown)
+curl -Lo plugindev https://gitcode.com/JianFeeeee/homeagent-sdk/releases/download/v1.1.0/plugindev_linux_amd64
 chmod +x plugindev
 
 # Or build from source
@@ -340,6 +363,33 @@ enabled := sdk.AutoRestart()
 ```
 
 The platform automatically restarts the plugin on crash, ensuring service availability.
+
+> ⚠️ `SetAutoRestart` is typically used to decide whether auto-restart is safe *after* an
+> external connection has been established, and that connection setup usually happens in a
+> background goroutine while the kernel reads the flag from another one — which is inherently
+> concurrent. **SDK 1.1.0 locks this flag and all API fields** (`-race` reported 11 data races;
+> in production this showed up as sporadic nil-dereference crashes during plugin reload). Upgrade
+> if you are on anything earlier.
+
+## Concurrency Contract for Plugin Developers
+
+`PluginSDK` is a **shared object used by multiple goroutines**: the polling, listening and timer
+callbacks you start in `Start()` all hold the same `*PluginSDK` and push messages into it, while
+the kernel writes its API fields during load/reload. So:
+
+- **Guaranteed by the SDK**: all API accessors (`Memory()`/`DocMemory()`/…), all injection methods,
+  `SetAutoRestart`/`AutoRestart`, `RegisterTool`/`RegisterStage`, and
+  `RunStopHandlers`/`RunOnRemoveHandlers` (idempotent; concurrent calls still run it once).
+- **Your responsibility**: every field of `StageContext` is exported, and concurrent read/write
+  must hold `ctx.Lock()`/`ctx.RLock()`. Especially `ctx.Extra` — **concurrent map writes are a
+  fatal in Go, and `recover` cannot catch it**.
+
+```go
+ctx.Lock()
+ctx.Extra["mykey"] = value
+ctx.FinalText += "supplementary note"
+ctx.Unlock()
+```
 
 ## Restricted SDK vs Full SDK
 
