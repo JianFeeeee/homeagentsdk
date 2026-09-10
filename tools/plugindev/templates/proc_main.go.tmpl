@@ -42,6 +42,9 @@ const (
 	sbOffCtxSize    = 24
 	sbOffEvtOff     = 28
 	sbOffEvtSize    = 32
+	sbOffArenaOff   = 36
+	sbOffArenaCap   = 40
+	sbOffArenaUsed  = 44
 )
 
 // ---- StageContext 段内部布局（与内核 internal/plugin/proc/shm.go 一致）----
@@ -89,6 +92,43 @@ const (
 	flagResponseSet = 1
 )
 
+// SharedRef 跨进程共享内存描述符。
+type SharedRef struct {
+	Offset     uint32 `json:"offset"`
+	Length     uint32 `json:"length"`
+	Generation uint32 `json:"generation"`
+	Flags      uint32 `json:"flags"`
+}
+
+func (r SharedRef) IsZero() bool { return r.Offset == 0 && r.Length == 0 }
+func (r SharedRef) Slice(data []byte) []byte {
+	if r.IsZero() || int(r.Offset)+int(r.Length) > len(data) {
+		return nil
+	}
+	return data[r.Offset : r.Offset+r.Length]
+}
+
+// arena 辅助（插件侧简化版：bump 分配）
+var arenaOff uint32
+var arenaUsed uint32
+
+func arenaWrite(b []byte) (SharedRef, error) {
+	if len(b) == 0 {
+		return SharedRef{}, nil
+	}
+	off := arenaUsed
+	if off == 0 {
+		off = 1
+	}
+	end := off + uint32(len(b))
+	if int(end) > len(region)-int(arenaOff) {
+		return SharedRef{}, fmt.Errorf("arena 空间不足")
+	}
+	copy(region[arenaOff+off:arenaOff+end], b)
+	arenaUsed = end
+	return SharedRef{Offset: arenaOff + off, Length: uint32(len(b))}, nil
+}
+
 // ---- 全局状态 ----
 
 var (
@@ -112,6 +152,7 @@ var (
 	outputCleaners = map[string]func(string) string{}
 
 	shm []byte
+	region []byte // 统一区域完整 mmap（用于 SharedRef 读写）
 
 	// 事件环（§3.6）：fd 4 = 事件环段 mmap，fd 5 = eventfd 读端
 	evtRingData []byte
@@ -1002,9 +1043,9 @@ func handleKernelRequest(req *rpcRequest) {
 
 	case "cleaner.invoke":
 		var p struct {
-			Scope string `json:"scope"`
-			Name  string `json:"name"`
-			Text  string `json:"text"`
+			Scope   string `json:"scope"`
+			Name    string `json:"name"`
+			TextRef SharedRef `json:"text_ref"`
 		}
 		if err := json.Unmarshal(req.Params, &p); err != nil {
 			respondErr(req.ID, fmt.Errorf("解析 Cleaner 参数: %w", err))
@@ -1025,7 +1066,14 @@ func handleKernelRequest(req *rpcRequest) {
 			respondErr(req.ID, fmt.Errorf("%s %s 未注册 Cleaner", p.Scope, p.Name))
 			return
 		}
-		respond(req.ID, map[string]interface{}{"text": cleaner(p.Text)})
+		input := string(p.TextRef.Slice(region))
+		output := cleaner(input)
+		outRef, err := arenaWrite([]byte(output))
+		if err != nil {
+			respondErr(req.ID, fmt.Errorf("arena 写入失败: %w", err))
+			return
+		}
+		respond(req.ID, map[string]interface{}{"text_ref": outRef})
 
 	case "stage.invoke":
 		handleStageInvoke(req)
@@ -1150,6 +1198,10 @@ func handleHandshake(req *rpcRequest) {
 		evtSize := binary.LittleEndian.Uint32(m[sbOffEvtSize:])
 		// shm 指向 StageContext 段，后续代码用 shm[off...] 访问该段内部字段
 		shm = m[ctxOff : ctxOff+ctxSize]
+		// region 保存完整 mmap 区域，供 SharedRef 读写 arena
+		region = m
+		arenaOff = binary.LittleEndian.Uint32(m[sbOffArenaOff:])
+		arenaUsed = 1
 		// 挂载事件环段 + 打开通知句柄（§13.1：EvtRing 在统一区域内）
 		if p.EvtRingSize > 0 && evtSize > 0 {
 			er := m[evtOff : evtOff+evtSize]
