@@ -147,6 +147,20 @@ func TestProcTemplate_HandlesAllKernelCalls(t *testing.T) {
 	}
 }
 
+// 工具调用的 payload 必须走内核标定的**调用帧**（funccall 模型）。
+//
+// 共享内存是内核内部实现（插件作者只看到普通 map），但模板必须在传输层
+// 正确读写 frame / args_len / result_ref。漏接线的后果很隐蔽：参数被静默
+// 丢弃、结果只走内联，性能退化而不报错。
+func TestProcTemplate_ToolInvokeUsesSharedRef(t *testing.T) {
+	src := loadProcTemplate(t)
+	for _, want := range []string{"frame", "args_len", "result_ref"} {
+		if !strings.Contains(src, want) {
+			t.Errorf("模板的 tool.invoke 必须处理 %q（payload 走内核标定的调用帧）", want)
+		}
+	}
+}
+
 // 模板必须通过 arena.alloc / arena.free 向内核申请与归还共享内存。
 //
 // 共享内存是内核独占管理的**内部实现**：插件不能自己维护分配游标。

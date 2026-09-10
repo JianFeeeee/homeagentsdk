@@ -112,6 +112,12 @@ func (r SharedRef) Slice(data []byte) []byte {
 	return data[r.Offset : r.Offset+r.Length]
 }
 
+// SharedRef.Flags 语义位（须与内核 internal/plugin/proc/arena.go 一致）。
+const (
+	sharedRefFlagJSON   = 1 << 0 // 载荷是 JSON
+	sharedRefFlagExpand = 1 << 1 // 引用指向插件申请的扩容块
+)
+
 // region 是内核传入的统一共享区域 mmap（handshake 时设置）。
 var region []byte
 
@@ -142,6 +148,62 @@ func arenaFree(ref SharedRef) {
 		return
 	}
 	callCoreVoid("arena.free", map[string]interface{}{"ref": ref})
+}
+
+// ---- 调用帧（funccall 模型）辅助 ----
+//
+// 工具调用/清洗由内核发起：内核标定一块内存帧交给插件，插件在帧内工作，
+// 只有结果超出内核预留的预算时才向内核申请扩容块。
+
+// frameInput 返回帧内的输入段（内核写入的参数/输入文本）。
+func frameInput(frame SharedRef, inputLen uint32) []byte {
+	if frame.IsZero() || int(inputLen) > len(frame.Slice(region)) {
+		return nil
+	}
+	return frame.Slice(region)[:inputLen]
+}
+
+// frameOutput 尝试把 payload 写进帧的结果区（帧内 [inputLen, frame.Length)）。
+// 放不下时返回错误，由调用方决定是否申请扩容块。
+func frameOutput(frame SharedRef, inputLen uint32, payload []byte, jsonFlag bool) (SharedRef, error) {
+	if frame.IsZero() {
+		return SharedRef{}, fmt.Errorf("无调用帧")
+	}
+	area := frame.Slice(region)
+	start := int(inputLen)
+	if start > len(area) || len(payload) > len(area)-start {
+		return SharedRef{}, fmt.Errorf("帧内空间不足（需 %d，剩 %d）", len(payload), len(area)-start)
+	}
+	copy(region[frame.Offset+uint32(start):], payload)
+	ref := SharedRef{
+		Offset:     frame.Offset + uint32(start),
+		Length:     uint32(len(payload)),
+		Generation: frame.Generation,
+	}
+	if jsonFlag {
+		ref.Flags |= sharedRefFlagJSON
+	}
+	return ref, nil
+}
+
+// arenaPut 申请一块扩容块并写入 payload，引用上打 sharedRefFlagExpand
+// 告知内核该块需单独归还（插件只申请，回收由内核做）。
+func arenaPut(payload []byte, jsonFlag bool) (SharedRef, error) {
+	ref, err := arenaAlloc(uint32(len(payload)))
+	if err != nil {
+		return SharedRef{}, err
+	}
+	if len(payload) > int(ref.Length) {
+		arenaFree(ref)
+		return SharedRef{}, fmt.Errorf("扩容块容量不足（需 %d，得 %d）", len(payload), ref.Length)
+	}
+	copy(region[ref.Offset:ref.Offset+uint32(len(payload))], payload)
+	ref.Length = uint32(len(payload))
+	ref.Flags |= sharedRefFlagExpand
+	if jsonFlag {
+		ref.Flags |= sharedRefFlagJSON
+	}
+	return ref, nil
 }
 
 // inlinePayloadLimit 是走内联 JSON 的上限。
@@ -1082,10 +1144,27 @@ func handleKernelRequest(req *rpcRequest) {
 
 	case "tool.invoke":
 		var p struct {
-			Name string                 `json:"name"`
-			Args map[string]interface{} `json:"args"`
+			Name    string                 `json:"name"`
+			Args    map[string]interface{} `json:"args"`
+			Frame   SharedRef              `json:"frame"`
+			ArgsLen uint32                 `json:"args_len"`
 		}
 		json.Unmarshal(req.Params, &p)
+
+		// 参数：内核标定帧的前段。只有直连 RPC 的调用方（无帧）才走
+		// 内联 Args——生产路径永远走帧。
+		args := p.Args
+		if !p.Frame.IsZero() {
+			if blob := frameInput(p.Frame, p.ArgsLen); len(blob) > 0 {
+				var decoded map[string]interface{}
+				if err := json.Unmarshal(blob, &decoded); err != nil {
+					respondErr(req.ID, fmt.Errorf("解析共享参数: %w", err))
+					return
+				}
+				args = decoded
+			}
+		}
+
 		handlerMu.RLock()
 		h, ok := toolHandlers[p.Name]
 		handlerMu.RUnlock()
@@ -1093,20 +1172,34 @@ func handleKernelRequest(req *rpcRequest) {
 			respondErr(req.ID, fmt.Errorf("未注册的工具: %s", p.Name))
 			return
 		}
-		res, err := h(p.Args)
+		res, err := h(args)
 		if err != nil {
 			respondErr(req.ID, err)
 			return
 		}
-		respond(req.ID, map[string]interface{}{"result": res})
+
+		blob, err := json.Marshal(res)
+		if err != nil {
+			respondErr(req.ID, fmt.Errorf("序列化结果: %w", err))
+			return
+		}
+		// 结果优先写进内核标定的帧；放不下才申请扩容块。
+		outRef, err := frameOutput(p.Frame, p.ArgsLen, blob, true)
+		if err != nil {
+			outRef, err = arenaPut(blob, true)
+			if err != nil {
+				respondErr(req.ID, fmt.Errorf("结果扩容失败: %w", err))
+				return
+			}
+		}
+		respond(req.ID, map[string]interface{}{"result_ref": outRef})
 
 	case "cleaner.invoke":
 		var p struct {
-			Scope   string    `json:"scope"`
-			Name    string    `json:"name"`
-			Text    string    `json:"text"`
-			TextRef SharedRef `json:"text_ref"`
-			RespRef SharedRef `json:"resp_ref"`
+			Scope    string    `json:"scope"`
+			Name     string    `json:"name"`
+			Frame    SharedRef `json:"frame"`
+			InputLen uint32    `json:"input_len"`
 		}
 		if err := json.Unmarshal(req.Params, &p); err != nil {
 			respondErr(req.ID, fmt.Errorf("解析 Cleaner 参数: %w", err))
@@ -1127,23 +1220,20 @@ func handleKernelRequest(req *rpcRequest) {
 			respondErr(req.ID, fmt.Errorf("%s %s 未注册 Cleaner", p.Scope, p.Name))
 			return
 		}
-		// 读输入：优先内核写入的共享槽，否则内联。
-		input := p.Text
-		if !p.TextRef.IsZero() {
-			input = string(p.TextRef.Slice(region))
-		}
+
+		input := string(frameInput(p.Frame, p.InputLen))
 		output := cleaner(input)
 
-		// 写结果：内核预分配了响应槽且放得下就写槽，否则内联。
-		// 插件不申请任何槽（“谁分配谁归还”全部在内核侧）。
-		if !p.RespRef.IsZero() && len(output) <= int(p.RespRef.Length) {
-			copy(region[p.RespRef.Offset:p.RespRef.Offset+uint32(len(output))], output)
-			outRef := p.RespRef
-			outRef.Length = uint32(len(output))
-			respond(req.ID, map[string]interface{}{"text_ref": outRef})
-			return
+		// 结果优先写进内核标定的帧；放不下才申请扩容块。
+		outRef, err := frameOutput(p.Frame, p.InputLen, []byte(output), false)
+		if err != nil {
+			outRef, err = arenaPut([]byte(output), false)
+			if err != nil {
+				respondErr(req.ID, fmt.Errorf("结果扩容失败: %w", err))
+				return
+			}
 		}
-		respond(req.ID, map[string]interface{}{"text": output})
+		respond(req.ID, map[string]interface{}{"text_ref": outRef})
 
 	case "stage.invoke":
 		handleStageInvoke(req)
