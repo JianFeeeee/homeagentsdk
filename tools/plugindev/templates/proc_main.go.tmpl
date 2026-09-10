@@ -1242,8 +1242,23 @@ func handleKernelRequest(req *rpcRequest) {
 		var p struct {
 			Channel string                 `json:"channel"`
 			Args    map[string]interface{} `json:"args"`
+			Frame   SharedRef              `json:"frame"`
+			ArgsLen uint32                 `json:"args_len"`
 		}
 		json.Unmarshal(req.Params, &p)
+		// 参数：内核标定帧的前段（§13.6）。只有直连 RPC 的调用方（无帧）
+		// 才走内联 Args——生产路径永远走帧，大 payload 不再爆管道。
+		args := p.Args
+		if !p.Frame.IsZero() {
+			if blob := frameInput(p.Frame, p.ArgsLen); len(blob) > 0 {
+				var decoded map[string]interface{}
+				if err := json.Unmarshal(blob, &decoded); err != nil {
+					respondErr(req.ID, fmt.Errorf("解析共享输出参数: %w", err))
+					return
+				}
+				args = decoded
+			}
+		}
 		handlerMu.RLock()
 		h, ok := outputHandlers[p.Channel]
 		handlerMu.RUnlock()
@@ -1252,7 +1267,7 @@ func handleKernelRequest(req *rpcRequest) {
 			return
 		}
 		// 同步返回真实结果——内核据此告知模型成功/失败，不再假成功（§9.4）
-		res, err := h(p.Args)
+		res, err := h(args)
 		if err != nil {
 			respondErr(req.ID, err)
 			return
