@@ -233,6 +233,16 @@ func putInArena(payload string) (SharedRef, bool) {
 	return ref, true
 }
 
+// putValueInArena 把任意值 JSON 序列化后放进共享槽，太小或 arena 不可用时
+// 返回 false（调用方退到内联）。
+func putValueInArena(v interface{}) (SharedRef, bool) {
+	blob, err := json.Marshal(v)
+	if err != nil {
+		return SharedRef{}, false
+	}
+	return putInArena(string(blob))
+}
+
 // callWithText 按 payload 大小自动选择共享槽或内联，发起一次带文本的业务 RPC。
 //
 // 共享内存对插件开发者完全透明：SDK 层只看得到 string。
@@ -686,7 +696,18 @@ func (procIO) InjectInputSync(s, c, t string) string {
 	return r.Reply
 }
 func (procIO) SetToolBlocks(blocks []sdk.ContentBlock) {
-	if err := callCoreVoid("io.setToolBlocks", map[string]interface{}{"blocks": blocks}); err != nil {
+	// 媒体块经共享内存（blocks_ref）：本地生成的图/音频是 base64 data URL，
+	// 一张图可达数 MB；内联时整份 base64 还要在 RPC 报文里再编码/再拷贝一遍。
+	// 更重要的是内容本体落在共享段里，插件回调才能就地改写。
+	// 小 payload（如纯文本块）仍走内联，省一次 RPC。
+	args := map[string]interface{}{}
+	if ref, ok := putValueInArena(blocks); ok {
+		defer arenaFree(ref)
+		args["blocks_ref"] = ref
+	} else {
+		args["blocks"] = blocks
+	}
+	if err := callCoreVoid("io.setToolBlocks", args); err != nil {
 		log.Printf("SetToolBlocks: %v", err)
 	}
 }
@@ -694,15 +715,13 @@ func (procIO) SetToolBlocks(blocks []sdk.ContentBlock) {
 // 带媒体的注入：插件主动发起一轮带图/音频的对话。
 // 与 SetToolBlocks 的区别是媒体在**本轮**就到模型手上，而不是等下一条 tool message。
 func (procIO) InjectInputMedia(s, c, t string, blocks []sdk.ContentBlock) {
-	callCoreVoid("io.injectMedia", map[string]interface{}{
-		"source": s, "channel": c, "text": t, "blocks": blocks,
-	})
+	callCoreVoid("io.injectMedia", mediaArgs(s, c, t, blocks))
 }
 
 func (procIO) InjectInputMediaSync(s, c, t string, blocks []sdk.ContentBlock) string {
-	raw, err := callCore("io.injectMediaSync", map[string]interface{}{
-		"source": s, "channel": c, "text": t, "blocks": blocks,
-	})
+	args, free := mediaArgsOwned(s, c, t, blocks)
+	defer free()
+	raw, err := callCore("io.injectMediaSync", args)
 	if err != nil {
 		return ""
 	}
@@ -714,9 +733,32 @@ func (procIO) InjectInputMediaSync(s, c, t string, blocks []sdk.ContentBlock) st
 }
 
 func (procIO) InjectInterruptMedia(s, c, t string, blocks []sdk.ContentBlock) {
-	callCoreVoid("io.injectInterruptMedia", map[string]interface{}{
-		"source": s, "channel": c, "text": t, "blocks": blocks,
-	})
+	args, free := mediaArgsOwned(s, c, t, blocks)
+	defer free()
+	callCoreVoid("io.injectInterruptMedia", args)
+}
+
+// mediaArgs 构造媒体注入参数，并在返回前释放临时共享槽。
+// 只能用在调用结束后立即返回的路径（fire-and-forget）。
+func mediaArgs(s, c, t string, blocks []sdk.ContentBlock) map[string]interface{} {
+	args, free := mediaArgsOwned(s, c, t, blocks)
+	defer free()
+	return args
+}
+
+// mediaArgsOwned 构造媒体注入参数，并返回释放函数。
+//
+// 为什么要返回释放函数而不是自己 defer：调用方可能是需要等应答的同步调用
+// （injectMediaSync），槽在应答到达前不能被回收，否则内核读到的是已释放的内存。
+func mediaArgsOwned(s, c, t string, blocks []sdk.ContentBlock) (map[string]interface{}, func()) {
+	args := map[string]interface{}{"source": s, "channel": c, "text": t}
+	ref, ok := putValueInArena(blocks)
+	if !ok {
+		args["blocks"] = blocks
+		return args, func() {}
+	}
+	args["blocks_ref"] = ref
+	return args, func() { arenaFree(ref) }
 }
 
 type procMemory struct{}
