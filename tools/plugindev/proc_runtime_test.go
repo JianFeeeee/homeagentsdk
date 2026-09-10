@@ -133,16 +133,41 @@ func TestProcTemplate_CoversAllCoreMethods(t *testing.T) {
 	}
 }
 
-// 模板必须处理内核发来的全部 7 个调用（原 C ABI 的 7 个 //export）。
+// 模板必须处理内核发来的全部调用（含无法 JSON 序列化的 Cleaner 回调）。
 func TestProcTemplate_HandlesAllKernelCalls(t *testing.T) {
 	src := loadProcTemplate(t)
 	for _, m := range []string{
 		"handshake",
 		"plugin.init", "plugin.start", "plugin.stop",
-		"tool.invoke", "stage.invoke", "output.invoke",
+		"tool.invoke", "cleaner.invoke", "stage.invoke", "output.invoke",
 	} {
 		if !strings.Contains(src, `case "`+m+`"`) {
 			t.Errorf("模板未处理内核调用 %q", m)
+		}
+	}
+}
+
+// 模板必须通过 arena.alloc / arena.free 向内核申请与归还共享内存。
+//
+// 共享内存是内核独占管理的**内部实现**：插件不能自己维护分配游标。
+// 历史上两版跨进程分配器（bump 游标 / 模板内位图 CAS）都因为把可变
+// 分配状态放在共享内存里而出竞态，所以这里做回归保护。
+func TestProcTemplate_UsesKernelArenaRPC(t *testing.T) {
+	src := loadProcTemplate(t)
+
+	for _, m := range []string{`"arena.alloc"`, `"arena.free"`} {
+		if !strings.Contains(src, m) {
+			t.Errorf("模板缺少内核共享内存 RPC %s（插件必须向内核申请/归还）", m)
+		}
+	}
+
+	// 禁止插件侧再出现本地分配器符号。
+	//
+	// 只查代码不查注释：注释里会解释“为什么不再这么做”。
+	code := stripComments(t, src)
+	for _, forbidden := range []string{"arenaUsed", "arenaWrite"} {
+		if strings.Contains(code, forbidden) {
+			t.Errorf("模板不应再出现插件侧分配器 %q（共享内存由内核独占管理）", forbidden)
 		}
 	}
 }
@@ -281,10 +306,11 @@ func TestProcTemplate_DispatchesRequestsConcurrently(t *testing.T) {
 	}
 }
 
-// 协议与共享段版本不匹配必须拒绝，不得半兼容运行。
+// 协议与共享内存区域版本/魔数不匹配必须拒绝，不得半兼容运行。
 func TestProcTemplate_RejectsVersionMismatch(t *testing.T) {
 	src := loadProcTemplate(t)
-	for _, want := range []string{"协议版本不匹配", "共享段版本不匹配", "共享段魔数不匹配"} {
+	// §13.1 起共享段合并为单一「统一区域」，魔数校验文案随之更新。
+	for _, want := range []string{"协议版本不匹配", "共享段版本不匹配", "统一区域魔数不匹配"} {
 		if !strings.Contains(src, want) {
 			t.Errorf("握手应校验并拒绝 %q", want)
 		}

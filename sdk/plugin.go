@@ -100,12 +100,13 @@ type ToolResult struct {
 
 // ToolDef describes a tool that the plugin exposes.
 type ToolDef struct {
-	Name        string                 `json:"name"`
-	Plugin      string                 `json:"plugin,omitempty"`
-	Description string                 `json:"description"`
-	Parameters  map[string]interface{} `json:"parameters"`
-	NoMemory    bool                   `json:"no_memory,omitempty"` // 此工具输出不参与记忆计算，但原文保留
-	Cleaner     func(string) string    `json:"-"`                   // 计算层过滤函数，不改原文；仅在向量化/jieba/蒸馏时调用
+	Name          string                 `json:"name"`
+	Plugin        string                 `json:"plugin,omitempty"`
+	Description   string                 `json:"description"`
+	Parameters    map[string]interface{} `json:"parameters"`
+	NoMemory      bool                   `json:"no_memory,omitempty"`      // 此工具输出不参与记忆计算，但原文保留
+	Cleaner       func(string) string    `json:"-"`                        // 计算层过滤函数，不改原文；仅在向量化/jieba/蒸馏时调用
+	ContextPolicy string                 `json:"context_policy,omitempty"` // 工具上下文策略："none"(默认) / "prune"
 }
 
 // IOInjector provides methods for injecting input and interrupts into the agent pipeline.
