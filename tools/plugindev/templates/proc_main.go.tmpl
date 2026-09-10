@@ -25,7 +25,13 @@ import (
 
 // ---- 协议常量（须与内核 internal/plugin/proc/protocol.go 一致）----
 
-const procProtocolVersion = 1
+// procProtocolVersion 必须与内核的 proc.ProtocolVersion 完全一致。
+//
+// v2：内核→插件的 payload 改用调用帧（tool/cleaner/output），媒体块改走
+// blocks_ref。v1 插件只读内联 args，遇上 v2 内核会拿到空参数；反过来 v2
+// 插件发 blocks_ref，v1 内核也会静默忽略。两边错配都不报错、只是静默失效，
+// 所以靠这个常量在握手上显式拦下。
+const procProtocolVersion = 2
 
 // ---- 统一共享内存区域布局（与内核 internal/plugin/proc/unified.go 一致）----
 
@@ -826,7 +832,19 @@ func (procDocMemory) Query(text string, topK int) []*sdk.Doc {
 	return r.Docs
 }
 func (procDocMemory) Insert(d *sdk.Doc) error {
-	return callCoreVoid("doc.insert", map[string]interface{}{"doc": d})
+	return callCoreVoid("doc.insert", docInsertArgs(d))
+}
+
+// docInsertArgs 构造 doc.insert 参数：正文优先走共享内存。
+//
+// doc_content 可达几十 KB～数 MB，内联时整份要在 RPC 报文里再编码再拷贝一遍；
+// 且内容本体落在共享段里，插件回调才能就地改写。小文档仍内联。
+func docInsertArgs(d *sdk.Doc) map[string]interface{} {
+	if ref, ok := putValueInArena(d); ok {
+		defer arenaFree(ref)
+		return map[string]interface{}{"doc_ref": ref}
+	}
+	return map[string]interface{}{"doc": d}
 }
 
 // InsertWithMedia 写入文档并关联媒体。
@@ -834,9 +852,28 @@ func (procDocMemory) Insert(d *sdk.Doc) error {
 // 内核会把 `[mime <短digest>] <描述>` 标记补进 Content 并挂上引用，回传的
 // doc 带着补好的 Content/ID/MediaDigests——回写进 d 让调用方能拿到这些。
 func (procDocMemory) InsertWithMedia(d *sdk.Doc, atts []sdk.MediaAttachment) error {
-	raw, err := callCore("doc.insertWithMedia", map[string]interface{}{
-		"doc": d, "attachments": atts,
-	})
+	// 文档正文与附件（含媒体 data URL）都优先走共享内存。
+	args := map[string]interface{}{}
+	var frees []func()
+	defer func() {
+		for _, f := range frees {
+			f()
+		}
+	}()
+	if ref, ok := putValueInArena(d); ok {
+		frees = append(frees, func() { arenaFree(ref) })
+		args["doc_ref"] = ref
+	} else {
+		args["doc"] = d
+	}
+	if ref, ok := putValueInArena(atts); ok {
+		frees = append(frees, func() { arenaFree(ref) })
+		args["attachments_ref"] = ref
+	} else {
+		args["attachments"] = atts
+	}
+
+	raw, err := callCore("doc.insertWithMedia", args)
 	if err != nil {
 		return err
 	}
@@ -875,6 +912,13 @@ func (procKnowledge) Search(q string, topK int) ([]*sdk.Knowledge, error) {
 	return r.Results, nil
 }
 func (procKnowledge) Add(name, content string) error {
+	// 知识正文可达数十 KB，优先走共享内存（内容是 JSON 字符串）。
+	if ref, ok := putValueInArena(content); ok {
+		defer arenaFree(ref)
+		return callCoreVoid("knowledge.add", map[string]interface{}{
+			"name": name, "content_ref": ref,
+		})
+	}
 	return callCoreVoid("knowledge.add", map[string]string{"name": name, "content": content})
 }
 func (procKnowledge) List() ([]string, error) {
