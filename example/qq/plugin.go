@@ -412,6 +412,10 @@ type 枚举: text（文字）/ voice（语音转文字后发送）/ image（图�
 		Name: tp + "get_message", Description: botInfo + "通过 message_id 从 NapCat 实时获取消息正文、发送者、附件等信息。message_id 从中断消息的 message_id=N 获取，或从 reply_to 的 message_id 获取。",
 		NoMemory: false,
 		Cleaner:  cleaner,
+		// 消息正文只在当轮需要（决策怎么回复）；用完即裁剪。
+		// 不裁的后果是每条 QQ 消息的完整正文都留在 L0 上下文里，
+		// 长会话下持续挤占 token 预算（§13.8）。
+		ContextPolicy: "prune",
 		Parameters: map[string]interface{}{
 			"type": "object", "properties": map[string]interface{}{
 				"message_id": map[string]interface{}{"type": "integer", "description": "NapCat消息ID（从中断消息的 message_id=N 或 reply_to.message_id 获取）"},
