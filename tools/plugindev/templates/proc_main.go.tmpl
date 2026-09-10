@@ -27,7 +27,24 @@ import (
 
 const procProtocolVersion = 1
 
-// ---- 共享段布局（须与内核 internal/plugin/proc/shm.go 一致）----
+// ---- 统一共享内存区域布局（与内核 internal/plugin/proc/unified.go 一致）----
+
+const (
+	unifiedMagic   = 0x554D5352 // "UMSR" — Unified Memory Shared Region
+	unifiedVersion = 1
+	superBlockSize = 64
+
+	sbOffMagic      = 0
+	sbOffVersion    = 4
+	sbOffGeneration = 8
+	sbOffCapacity   = 16
+	sbOffCtxOff     = 20
+	sbOffCtxSize    = 24
+	sbOffEvtOff     = 28
+	sbOffEvtSize    = 32
+)
+
+// ---- StageContext 段内部布局（与内核 internal/plugin/proc/shm.go 一致）----
 
 const (
 	shmStageFieldCount = 18
@@ -88,8 +105,11 @@ var (
 
 	handlerMu      sync.RWMutex
 	toolHandlers   = map[string]sdk.ToolHandler{}
+	toolCleaners   = map[string]func(string) string{}
+	inputCleaners  = map[string]func(string) string{}
 	stageHandlers  = map[string]sdk.StageHandler{}
 	outputHandlers = map[string]sdk.ToolHandler{}
+	outputCleaners = map[string]func(string) string{}
 
 	shm []byte
 
@@ -416,9 +436,14 @@ func buildPluginSDK(name string) *sdk.PluginSDK {
 		func(toolName string, def sdk.ToolDef, handler sdk.ToolHandler) error {
 			handlerMu.Lock()
 			toolHandlers[toolName] = handler
+			if def.Cleaner != nil {
+				toolCleaners[toolName] = def.Cleaner
+			} else {
+				delete(toolCleaners, toolName)
+			}
 			handlerMu.Unlock()
 			return callCoreVoid("tool.register", map[string]interface{}{
-				"name": toolName, "def": def,
+				"name": toolName, "def": def, "has_cleaner": def.Cleaner != nil,
 			})
 		},
 		func(stage sdk.Stage, handler sdk.StageHandler) {
@@ -437,10 +462,16 @@ func buildPluginSDK(name string) *sdk.PluginSDK {
 		func(chName string, caps int, desc string, def sdk.ChannelDef, handler sdk.ToolHandler) error {
 			handlerMu.Lock()
 			outputHandlers[chName] = handler
+			if def.Cleaner != nil {
+				outputCleaners[chName] = def.Cleaner
+			} else {
+				delete(outputCleaners, chName)
+			}
 			handlerMu.Unlock()
 			return callCoreVoid("output.register", map[string]interface{}{
 				"name": chName, "caps": caps, "desc": desc,
 				"def": map[string]interface{}{"NoMemory": def.NoMemory},
+				"has_cleaner": def.Cleaner != nil,
 			})
 		},
 	)
@@ -454,9 +485,17 @@ func buildPluginSDK(name string) *sdk.PluginSDK {
 	base.SetTextMemoryAPI(procTextMemory{})
 	base.SetPluginMgrAPI(procPluginMgr{})
 	base.SetInputChannelRegistrar(func(chName string, def sdk.ChannelDef) error {
+		handlerMu.Lock()
+		if def.Cleaner != nil {
+			inputCleaners[chName] = def.Cleaner
+		} else {
+			delete(inputCleaners, chName)
+		}
+		handlerMu.Unlock()
 		return callCoreVoid("input.register", map[string]interface{}{
 			"name": chName,
 			"def":  map[string]interface{}{"NoMemory": def.NoMemory},
+			"has_cleaner": def.Cleaner != nil,
 		})
 	})
 	return base
@@ -961,6 +1000,33 @@ func handleKernelRequest(req *rpcRequest) {
 		}
 		respond(req.ID, map[string]interface{}{"result": res})
 
+	case "cleaner.invoke":
+		var p struct {
+			Scope string `json:"scope"`
+			Name  string `json:"name"`
+			Text  string `json:"text"`
+		}
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			respondErr(req.ID, fmt.Errorf("解析 Cleaner 参数: %w", err))
+			return
+		}
+		handlerMu.RLock()
+		var cleaner func(string) string
+		switch p.Scope {
+		case "tool":
+			cleaner = toolCleaners[p.Name]
+		case "input":
+			cleaner = inputCleaners[p.Name]
+		case "output":
+			cleaner = outputCleaners[p.Name]
+		}
+		handlerMu.RUnlock()
+		if cleaner == nil {
+			respondErr(req.ID, fmt.Errorf("%s %s 未注册 Cleaner", p.Scope, p.Name))
+			return
+		}
+		respond(req.ID, map[string]interface{}{"text": cleaner(p.Text)})
+
 	case "stage.invoke":
 		handleStageInvoke(req)
 
@@ -1065,41 +1131,41 @@ func handleHandshake(req *rpcRequest) {
 		pluginName = p.PluginName
 	}
 
-	// 挂载 StageContext 共享段。
-	// 传递机制按平台不同（Unix 用继承的 fd，Windows 用命名段），
-	// 由 z_proc_shm_*.go 承担——本文件保持平台无关。
+	// 挂载统一共享内存区域。
+	// fd 3 (Unix) / 命名对象 (Windows) 传给插件子进程，包含 SuperBlock +
+	// StageContext + EvtRing 两段。SuperBlock 记录各段的偏移与大小。
 	if p.ShmSize > 0 {
-		m, err := attachStageShm(p.ShmSize)
+		m, err := attachUnifiedShm(p.ShmSize)
 		if err != nil {
-			respondErr(req.ID, fmt.Errorf("挂载共享段失败: %w", err))
+			respondErr(req.ID, fmt.Errorf("挂载统一共享区域失败: %w", err))
 			return
 		}
-		if got := binary.LittleEndian.Uint32(m[shmOffMagic:]); got != shmMagic {
-			respondErr(req.ID, fmt.Errorf("共享段魔数不匹配（0x%x）", got))
+		if got := binary.LittleEndian.Uint32(m[sbOffMagic:]); got != unifiedMagic {
+			respondErr(req.ID, fmt.Errorf("统一区域魔数不匹配（0x%x，期望 0x%x）", got, unifiedMagic))
 			return
 		}
-		shm = m
-	}
-
-	// 挂载事件环段 + 打开通知句柄（§3.6）
-	if p.EvtRingSize > 0 {
-		er, err := attachEvtRingShm(p.EvtRingSize)
-		if err != nil {
-			respondErr(req.ID, fmt.Errorf("挂载事件环段失败: %w", err))
-			return
+		ctxOff := binary.LittleEndian.Uint32(m[sbOffCtxOff:])
+		ctxSize := binary.LittleEndian.Uint32(m[sbOffCtxSize:])
+		evtOff := binary.LittleEndian.Uint32(m[sbOffEvtOff:])
+		evtSize := binary.LittleEndian.Uint32(m[sbOffEvtSize:])
+		// shm 指向 StageContext 段，后续代码用 shm[off...] 访问该段内部字段
+		shm = m[ctxOff : ctxOff+ctxSize]
+		// 挂载事件环段 + 打开通知句柄（§13.1：EvtRing 在统一区域内）
+		if p.EvtRingSize > 0 && evtSize > 0 {
+			er := m[evtOff : evtOff+evtSize]
+			if got := binary.LittleEndian.Uint32(er[evtOffMagic : evtOffMagic+4]); got != evtRingMagic {
+				respondErr(req.ID, fmt.Errorf("事件环魔数不匹配（0x%x）", got))
+				return
+			}
+			notifier, err := openEvtNotifier()
+			if err != nil {
+				respondErr(req.ID, fmt.Errorf("打开事件通知句柄失败: %w", err))
+				return
+			}
+			evtRingData = er
+			evtNotifier = notifier
+			go evtConsumerLoop()
 		}
-		if got := binary.LittleEndian.Uint32(er[evtOffMagic : evtOffMagic+4]); got != evtRingMagic {
-			respondErr(req.ID, fmt.Errorf("事件环魔数不匹配（0x%x）", got))
-			return
-		}
-		notifier, err := openEvtNotifier()
-		if err != nil {
-			respondErr(req.ID, fmt.Errorf("打开事件通知句柄失败: %w", err))
-			return
-		}
-		evtRingData = er
-		evtNotifier = notifier
-		go evtConsumerLoop()
 	}
 
 	respond(req.ID, map[string]interface{}{
