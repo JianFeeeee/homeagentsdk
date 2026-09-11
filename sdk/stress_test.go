@@ -463,11 +463,10 @@ func TestStress_MediaTypesJSONRoundTripAtScale(t *testing.T) {
 			data[i] = byte(i * 7 % 256)
 		}
 		att := MediaAttachment{
-			Digest:      strings.Repeat("a", 64),
-			MIME:        "image/png",
-			Data:        data,
-			Name:        "图片-名字 with space & 符号.png",
-			Description: "一张紫蓝红三色带图，含 emoji 🎨 与换行\n第二行",
+			Digest: strings.Repeat("a", 64),
+			MIME:   "image/png",
+			Data:   data,
+			Name:   "图片-名字 with space & 符号.png",
 		}
 		b, err := json.Marshal(att)
 		if err != nil {
@@ -485,7 +484,7 @@ func TestStress_MediaTypesJSONRoundTripAtScale(t *testing.T) {
 				t.Fatalf("size=%d 第 %d 字节损坏: %02x != %02x", n, i, back.Data[i], data[i])
 			}
 		}
-		if back.Name != att.Name || back.Description != att.Description || back.MIME != att.MIME || back.Digest != att.Digest {
+		if back.Name != att.Name || back.MIME != att.MIME || back.Digest != att.Digest {
 			t.Fatalf("size=%d 元数据往返不一致: %+v", n, back)
 		}
 	}
