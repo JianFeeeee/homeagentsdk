@@ -83,12 +83,27 @@ type ToolResult struct {
 }
 
 type ToolDef struct {
-	Name        string                 `json:"name"`
-	Plugin      string                 `json:"plugin,omitempty"`
-	Description string                 `json:"description"`
-	Parameters  map[string]interface{} `json:"parameters"`
-	NoMemory    bool                   `json:"no_memory,omitempty"`
-	Cleaner     func(string) string    `json:"-"`
+	Name          string                 `json:"name"`
+	Plugin        string                 `json:"plugin,omitempty"`
+	Description   string                 `json:"description"`
+	Parameters    map[string]interface{} `json:"parameters"`
+	NoMemory      bool                   `json:"no_memory,omitempty"`
+	Cleaner       func(string) string    `json:"-"`
+	ContextPolicy string                 `json:"context_policy,omitempty"`
+}
+
+// 上下文策略取值，与公共 SDK 一致。
+const (
+	ContextPolicyNone  = "none"
+	ContextPolicyPrune = "prune"
+)
+
+// InjectOptions 与公共 SDK 同构：声明一次注入是否记入记忆、是否据此裁剪上下文、
+// 以及用哪个已注册的通道 cleaner 清洗注入内容。
+type InjectOptions struct {
+	NoMemory      bool
+	ContextPolicy string
+	CleanerName   string
 }
 
 type IOInjector interface {
@@ -101,6 +116,14 @@ type IOInjector interface {
 	InjectInputMediaSync(source, channel, text string, blocks []ContentBlock) string
 	InjectInterruptMedia(source, channel, text string, blocks []ContentBlock)
 	SetToolBlocks(blocks []ContentBlock)
+
+	// 1.2.0 带标志位的注入，与公共 SDK 同构。
+	InjectTextOpts(source, channel, text string, opts InjectOptions)
+	InjectInterruptTextOpts(source, channel, text string, opts InjectOptions)
+	InjectInputSyncOpts(source, channel, text string, opts InjectOptions) string
+	InjectInputMediaOpts(source, channel, text string, blocks []ContentBlock, opts InjectOptions)
+	InjectInputMediaSyncOpts(source, channel, text string, blocks []ContentBlock, opts InjectOptions) string
+	InjectInterruptMediaOpts(source, channel, text string, blocks []ContentBlock, opts InjectOptions)
 }
 
 // ContentBlock 与公共 SDK 同构（OpenAI 多模态内容块格式）。
@@ -389,6 +412,29 @@ func (IOInjectorImpl) InjectInterruptMedia(source, channel, text string, blocks 
 }
 func (IOInjectorImpl) SetToolBlocks(blocks []ContentBlock) {
 	logf("set_tool_blocks: blocks=%d", len(blocks))
+}
+
+// ---- 带 InjectOptions 的注入 ----
+
+func (IOInjectorImpl) InjectTextOpts(source, channel, text string, opts InjectOptions) {
+	logf("inject_text_opts: source=%s channel=%s no_memory=%v policy=%s", source, channel, opts.NoMemory, opts.ContextPolicy)
+}
+func (IOInjectorImpl) InjectInterruptTextOpts(source, channel, text string, opts InjectOptions) {
+	logf("inject_interrupt_opts: source=%s channel=%s no_memory=%v policy=%s", source, channel, opts.NoMemory, opts.ContextPolicy)
+}
+func (IOInjectorImpl) InjectInputSyncOpts(source, channel, text string, opts InjectOptions) string {
+	logf("inject_sync_opts: source=%s channel=%s no_memory=%v policy=%s", source, channel, opts.NoMemory, opts.ContextPolicy)
+	return ""
+}
+func (IOInjectorImpl) InjectInputMediaOpts(source, channel, text string, blocks []ContentBlock, opts InjectOptions) {
+	logf("inject_input_media_opts: source=%s channel=%s blocks=%d no_memory=%v policy=%s", source, channel, len(blocks), opts.NoMemory, opts.ContextPolicy)
+}
+func (IOInjectorImpl) InjectInputMediaSyncOpts(source, channel, text string, blocks []ContentBlock, opts InjectOptions) string {
+	logf("inject_input_media_sync_opts: source=%s channel=%s blocks=%d no_memory=%v policy=%s", source, channel, len(blocks), opts.NoMemory, opts.ContextPolicy)
+	return ""
+}
+func (IOInjectorImpl) InjectInterruptMediaOpts(source, channel, text string, blocks []ContentBlock, opts InjectOptions) {
+	logf("inject_interrupt_media_opts: source=%s channel=%s blocks=%d no_memory=%v policy=%s", source, channel, len(blocks), opts.NoMemory, opts.ContextPolicy)
 }
 
 type PluginSDK struct {

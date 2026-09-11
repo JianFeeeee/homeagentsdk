@@ -1434,7 +1434,8 @@ func (p *Plugin) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if p.sdk != nil {
-		p.sdk.InjectInterruptText(p.name, p.name, interrupt)
+		// NoMemory：HTTP 侧来的中断提示，不是对话内容。
+		p.sdk.InjectInterruptTextOpts(p.name, p.name, interrupt, sdk.InjectOptions{NoMemory: true})
 	}
 	w.WriteHeader(http.StatusOK)
 }
@@ -2529,8 +2530,10 @@ func (p *Plugin) handleDownloadFile(args map[string]interface{}) (interface{}, e
 			p.updateDownloadTask(t, "done", savePath, "")
 			log.Printf("[qq] 文件下载完成: %s", savePath)
 			if p.sdk != nil {
-				p.sdk.InjectInterruptText(p.name, p.name,
-					fmt.Sprintf("文件下载完成: %s，保存在 %s", filepath.Base(savePath), savePath))
+				// NoMemory：下载完成的状态通知，不是记忆内容。
+				p.sdk.InjectInterruptTextOpts(p.name, p.name,
+					fmt.Sprintf("文件下载完成: %s，保存在 %s", filepath.Base(savePath), savePath),
+					sdk.InjectOptions{NoMemory: true})
 			}
 		} else {
 			errMsg = "下载失败，文件可能已过期"

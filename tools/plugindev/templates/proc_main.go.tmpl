@@ -253,15 +253,40 @@ func putValueInArena(v interface{}) (SharedRef, bool) {
 //
 // 共享内存对插件开发者完全透明：SDK 层只看得到 string。
 func callWithText(method, source, channel, text string) (json.RawMessage, error) {
+	return callWithTextOpts(method, source, channel, text, sdk.InjectOptions{})
+}
+
+// callWithTextOpts 是 callWithText 的带标志位版本。
+//
+// 只在标志位非零时才写入参数：零值（记入记忆 + 不裁剪）与旧参数形态完全一致，
+// 便于内核侧做兼容与灰度。
+func callWithTextOpts(method, source, channel, text string, opts sdk.InjectOptions) (json.RawMessage, error) {
 	if ref, ok := putInArena(text); ok {
 		defer arenaFree(ref)
-		return callCore(method, map[string]interface{}{
+		args := map[string]interface{}{
 			"source": source, "channel": channel, "text_ref": ref,
-		})
+		}
+		applyInjectOpts(args, opts)
+		return callCore(method, args)
 	}
-	return callCore(method, map[string]string{
+	args := map[string]interface{}{
 		"source": source, "channel": channel, "text": text,
-	})
+	}
+	applyInjectOpts(args, opts)
+	return callCore(method, args)
+}
+
+// applyInjectOpts 把 InjectOptions 摊进注入参数字典（仅非零值）。
+func applyInjectOpts(args map[string]interface{}, opts sdk.InjectOptions) {
+	if opts.NoMemory {
+		args["no_memory"] = true
+	}
+	if opts.ContextPolicy != "" {
+		args["context_policy"] = opts.ContextPolicy
+	}
+	if opts.CleanerName != "" {
+		args["cleaner_name"] = opts.CleanerName
+	}
 }
 
 // ---- 全局状态 ----
@@ -670,8 +695,10 @@ func buildPluginSDK(name string) *sdk.PluginSDK {
 		}
 		handlerMu.Unlock()
 		return callCoreVoid("input.register", map[string]interface{}{
-			"name":        chName,
-			"def":         map[string]interface{}{"NoMemory": def.NoMemory},
+			"name": chName,
+			// 整个结构体：手写字段白名单会把新增字段静默丢掉
+			// （ChannelDef.Cleaner 已标 json:"-"，可以整体 marshal）。
+			"def":         def,
 			"has_cleaner": def.Cleaner != nil,
 		})
 	})
@@ -680,18 +707,32 @@ func buildPluginSDK(name string) *sdk.PluginSDK {
 
 type procIO struct{}
 
+// 下面六个三参数方法是 *Opts 变体的零值糖：记入记忆 + 不裁剪。
+
 func (procIO) InjectText(s, c, t string) {
-	// 忽略错误：注入是 fire-and-forget，与内联路径语义一致
-	_, _ = callWithText("io.injectText", s, c, t)
+	procIO{}.InjectTextOpts(s, c, t, sdk.InjectOptions{})
 }
 func (procIO) InjectInterruptText(s, c, t string) {
-	_, _ = callWithText("io.injectInterrupt", s, c, t)
+	procIO{}.InjectInterruptTextOpts(s, c, t, sdk.InjectOptions{})
 }
 func (procIO) InjectTextNoMemory(s, c, t string) {
-	_, _ = callWithText("io.injectTextNoMem", s, c, t)
+	procIO{}.InjectTextOpts(s, c, t, sdk.InjectOptions{NoMemory: true})
 }
 func (procIO) InjectInputSync(s, c, t string) string {
-	raw, err := callWithText("io.injectInputSync", s, c, t)
+	return procIO{}.InjectInputSyncOpts(s, c, t, sdk.InjectOptions{})
+}
+
+// 以下为带标志位的注入：opts 决定这次注入是否进记忆、是否据此裁剪上下文。
+
+func (procIO) InjectTextOpts(s, c, t string, opts sdk.InjectOptions) {
+	// 忽略错误：注入是 fire-and-forget，与内联路径语义一致
+	_, _ = callWithTextOpts("io.injectText", s, c, t, opts)
+}
+func (procIO) InjectInterruptTextOpts(s, c, t string, opts sdk.InjectOptions) {
+	_, _ = callWithTextOpts("io.injectInterrupt", s, c, t, opts)
+}
+func (procIO) InjectInputSyncOpts(s, c, t string, opts sdk.InjectOptions) string {
+	raw, err := callWithTextOpts("io.injectInputSync", s, c, t, opts)
 	if err != nil {
 		return ""
 	}
@@ -721,12 +762,28 @@ func (procIO) SetToolBlocks(blocks []sdk.ContentBlock) {
 // 带媒体的注入：插件主动发起一轮带图/音频的对话。
 // 与 SetToolBlocks 的区别是媒体在**本轮**就到模型手上，而不是等下一条 tool message。
 func (procIO) InjectInputMedia(s, c, t string, blocks []sdk.ContentBlock) {
-	callCoreVoid("io.injectMedia", mediaArgs(s, c, t, blocks))
+	procIO{}.InjectInputMediaOpts(s, c, t, blocks, sdk.InjectOptions{})
 }
 
 func (procIO) InjectInputMediaSync(s, c, t string, blocks []sdk.ContentBlock) string {
+	return procIO{}.InjectInputMediaSyncOpts(s, c, t, blocks, sdk.InjectOptions{})
+}
+
+func (procIO) InjectInterruptMedia(s, c, t string, blocks []sdk.ContentBlock) {
+	procIO{}.InjectInterruptMediaOpts(s, c, t, blocks, sdk.InjectOptions{})
+}
+
+func (procIO) InjectInputMediaOpts(s, c, t string, blocks []sdk.ContentBlock, opts sdk.InjectOptions) {
 	args, free := mediaArgsOwned(s, c, t, blocks)
 	defer free()
+	applyInjectOpts(args, opts)
+	callCoreVoid("io.injectMedia", args)
+}
+
+func (procIO) InjectInputMediaSyncOpts(s, c, t string, blocks []sdk.ContentBlock, opts sdk.InjectOptions) string {
+	args, free := mediaArgsOwned(s, c, t, blocks)
+	defer free()
+	applyInjectOpts(args, opts)
 	raw, err := callCore("io.injectMediaSync", args)
 	if err != nil {
 		return ""
@@ -738,18 +795,11 @@ func (procIO) InjectInputMediaSync(s, c, t string, blocks []sdk.ContentBlock) st
 	return r.Reply
 }
 
-func (procIO) InjectInterruptMedia(s, c, t string, blocks []sdk.ContentBlock) {
+func (procIO) InjectInterruptMediaOpts(s, c, t string, blocks []sdk.ContentBlock, opts sdk.InjectOptions) {
 	args, free := mediaArgsOwned(s, c, t, blocks)
 	defer free()
+	applyInjectOpts(args, opts)
 	callCoreVoid("io.injectInterruptMedia", args)
-}
-
-// mediaArgs 构造媒体注入参数，并在返回前释放临时共享槽。
-// 只能用在调用结束后立即返回的路径（fire-and-forget）。
-func mediaArgs(s, c, t string, blocks []sdk.ContentBlock) map[string]interface{} {
-	args, free := mediaArgsOwned(s, c, t, blocks)
-	defer free()
-	return args
 }
 
 // mediaArgsOwned 构造媒体注入参数，并返回释放函数。

@@ -20,6 +20,15 @@ type BuildConfig struct {
 	Replaces []string
 }
 
+// buildFailed 记录本次构建是否有平台失败。
+//
+// 为什么要它：这两个构建函数遇到错误只是 Printf 后 return，而 cmdBuild 返回
+// void，于是**构建失败却以 0 退出**。调用方（批量重编脚本、CI、发版脚本）
+// 只能靠翻日志发现失败——实测中一个示例的 windows 目标编译失败，脚本却报
+// 「17/17 全绿」，并因此少产出 16 个 .hmap。
+// 判成功要看退出码，不能靠人读日志。
+var buildFailed bool
+
 func cmdBuild(args []string) {
 	// Read all config from plg.json first
 	plg, err := readPlgJSON("plg.json")
@@ -92,11 +101,18 @@ func cmdBuild(args []string) {
 
 	if bundle || len(targets) == 0 {
 		buildBundle(plg, outDir, sdkPath)
-		return
+	} else {
+		for _, t := range targets {
+			buildTarget(plg, t, outDir, sdkPath)
+		}
 	}
 
-	for _, t := range targets {
-		buildTarget(plg, t, outDir, sdkPath)
+	// 以非零码退出：调用方（批量重编、CI、发版脚本）靠退出码判成败。
+	// 以前这里直接 return，失败也退 0，于是「构建失败」只能靠人翻日志发现——
+	// 实测中就因此把一次部分失败当成了全绿。
+	if buildFailed {
+		fmt.Println("error: 至少一个目标构建失败（详见上面日志）")
+		os.Exit(1)
 	}
 }
 
@@ -105,13 +121,33 @@ func cmdBuild(args []string) {
 // 子进程模式下各平台产物同名（plugin.bin）——进程边界即 ABI 边界，
 // 不存在平台特有扩展名，故 zip 内按平台加后缀区分；
 // 内核安装时按当前平台挑对应条目重命名为 plugin.bin。
+//
+// **不含 windows**：插件只能运行在 homed 能跑的平台上，而 homed 已明确放弃
+// Windows 原生支持（插件体系依赖 fd 继承 + 统一共享内存区的段内偏移，
+// Windows 句柄模型无法表达）。Windows 用户走 WSL2，而 WSL2 就是 linux/amd64。
 var allBundleTargets = []struct {
 	target string
 	entry  string // 二进制在 zip 中的文件名
 }{
 	{"linux/amd64", "plugin.bin.linux.amd64"},
 	{"darwin/amd64", "plugin.bin.darwin.amd64"},
-	{"windows/amd64", "plugin.bin.windows.amd64"},
+}
+
+// checkTargetSupported 在构建前拦下**已知不支持**的目标，给出可执行的报错。
+//
+// 为什么要有它：插件运行在 homed 的进程里，所以目标平台必须是 homed 能跑的。
+// homed 已放弃 Windows 原生（原因：插件依赖 fd 继承与统一共享内存区段内偏移，
+// Windows 句柄模型无法表达），却还去构建 windows 插件，结果是死在一句
+// 「undefined: attachUnifiedShm」——看起来像代码 bug，实际是平台策略。
+// 这里换成明确的结论，并且**不静默跳过**：静默跳过会让人以为产出的包里包含 windows。
+func checkTargetSupported(target string) error {
+	if strings.HasPrefix(target, "windows/") {
+		return fmt.Errorf("不支持 windows 插件目标：插件运行在 homed 内，" +
+			"而 homed 已放弃 Windows 原生支持（插件体系依赖 fd 继承与统一共享内存区" +
+			"段内偏移解引用，Windows 句柄模型无法表达）。Windows 请用 WSL2——" +
+			"它就是 linux/amd64，用 --target linux/amd64 即可")
+	}
+	return nil
 }
 
 func buildBundle(plg *PlgConfig, outDir string, sdkPath string) {
@@ -122,6 +158,7 @@ func buildBundle(plg *PlgConfig, outDir string, sdkPath string) {
 	runtimeCleanup, err := generateProcRuntime()
 	if err != nil {
 		fmt.Printf("  error: %v\n", err)
+		buildFailed = true
 		return
 	}
 	defer runtimeCleanup()
@@ -132,9 +169,15 @@ func buildBundle(plg *PlgConfig, outDir string, sdkPath string) {
 	var binaries []binEntry
 
 	for _, bt := range allBundleTargets {
+		if err := checkTargetSupported(bt.target); err != nil {
+			fmt.Printf("  error: %v\n", err)
+			buildFailed = true
+			return
+		}
 		cfg, errMsg := resolveBuild(bt.target)
 		if cfg == nil {
 			fmt.Printf("  error: %s\n", errMsg)
+			buildFailed = true
 			return
 		}
 
@@ -151,7 +194,10 @@ func buildBundle(plg *PlgConfig, outDir string, sdkPath string) {
 
 		fmt.Printf("  compiling %s/%s (子进程模式，CGO_ENABLED=0)...\n", cfg.goos, cfg.goarch)
 		if err := cmd.Run(); err != nil {
+			// 单平台失败即整包失败：bundle 少一个平台就是个坏包，
+			// 却仍会生成 .hmap 让人以为打包成功。
 			fmt.Printf("  error: build %s/%s: %v\n", cfg.goos, cfg.goarch, err)
+			buildFailed = true
 			return
 		}
 		binaries = append(binaries, binEntry{src: outPath, zip: bt.entry})
@@ -544,6 +590,13 @@ func buildTarget(plg *PlgConfig, target, outDir, sdkPath string) {
 	}
 	defer runtimeCleanup()
 
+	// 已知未实现的目标在编译前拦下，给可执行的报错（见 checkTargetSupported）。
+	if err := checkTargetSupported(target); err != nil {
+		fmt.Printf("  error: %v\n", err)
+		buildFailed = true
+		return
+	}
+
 	// Auto-link thirdpart/ contents + source_dirs + replace targets
 	thirdpartCleanup := linkThirdpart(plg, target)
 	defer thirdpartCleanup()
@@ -562,6 +615,7 @@ func buildTarget(plg *PlgConfig, target, outDir, sdkPath string) {
 	fmt.Printf("  compiling %s/%s (子进程模式，CGO_ENABLED=0)...\n", cfg.goos, cfg.goarch)
 	if err := cmd.Run(); err != nil {
 		fmt.Printf("  error: build %s/%s: %v\n", cfg.goos, cfg.goarch, err)
+		buildFailed = true
 		return
 	}
 

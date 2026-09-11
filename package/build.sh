@@ -28,7 +28,7 @@ case "$TARGET" in
     ;;
   *)
     echo "Unknown target: $TARGET"
-    echo "Usage: $0 [native|linux/amd64|linux/arm64|darwin/amd64|darwin/arm64|windows/amd64|all] [all|plugindev]"
+    echo "Usage: $0 [native|linux/amd64|linux/arm64|darwin/amd64|darwin/arm64|windows/amd64|all] [all|plugindev|examples]"
     exit 1
 esac
 
@@ -55,9 +55,32 @@ build_plugindev() {
   cd "$PROJECT_ROOT"
 }
 
+# 示例插件产物随 SDK 一起发。
+#
+# 为什么必须发：插件二进制与内核是**协议绑定**的（ProtocolVersion + 统一共享
+# 内存区魔数）。SDK 升版常伴随协议变化，只发工具链不发示例产物，使用者很可能
+# 拿旧产物去装，表现是握手失败（魔数不匹配）——看起来像「插件坏了」而不是
+# 「版本不配套」。
+#
+# 用刚构建出来的那把工具链（而非 PATH 里的），保证产物与本次发版同源。
+build_examples() {
+  local dev="$BUILD_DIR/plugindev${SUFFIX:+_$SUFFIX}"
+  [ "$GOOS" = "windows" ] && dev="${dev}.exe"
+  echo "[BUILD] example plugins ${GOOS:-linux}/${GOARCH:-amd64} → $BUILD_DIR/examples"
+  PLUGINDEV="$dev" VERSION="$VERSION" bash "$PROJECT_ROOT/package/build-examples.sh" "$TARGET" "$BUILD_DIR/examples"
+  echo "  OK"
+}
+
 case "$COMPONENT" in
-  all|plugindev) build_plugindev ;;
+  all)
+    # 工具链必须先建完：示例用它来构建（同源保证协议一致）。
+    build_plugindev
+    build_examples
+    ;;
+  plugindev) build_plugindev ;;
+  examples)  build_examples ;;
   *)
     echo "Unknown component: $COMPONENT"
     exit 1
+    ;;
 esac
