@@ -9,6 +9,7 @@ const tmplPlgJSON = `{
   "description": "{{.Plg.Description}}",
   "author": "{{.Plg.Author}}",
   "entry": "{{.Plg.Entry}}",
+  "sdk": "{{.Plg.SDK}}",
   "tags": [{{range $i, $t := .Plg.Tags}}{{if $i}}, {{end}}"{{$t}}"{{end}}],
   "targets": "{{.Plg.Targets}}"
 }

@@ -79,6 +79,22 @@ func cmdBuild(args []string) {
 		return
 	}
 
+	// 项目可在 plg.json 里声明 sdk（中版本或完整版本，如 "1.2" / "1.2.1"）；
+	// 显式 --sdk-path / plg.json 的 sdk_path 优先 —— 那是直指源码目录，
+	// 常用于本机改 SDK 的联调场景。
+	if sdkPath == "" && strings.TrimSpace(plg.SDK) != "" {
+		dir, ver, err := ResolveSDKForProject(plg.SDK)
+		if err != nil {
+			fmt.Printf("error: %v\n", err)
+			os.Exit(1)
+		}
+		sdkPath, plg.ResolvedSDK = dir, ver
+		fmt.Printf("[hmapdev] SDK %s（项目声明 sdk=%s）\n", ver, plg.SDK)
+	} else if sdkPath != "" && plg.ResolvedSDK == "" {
+		// 走的是显式路径：尽力记录它是哪版（读不到就不记，不因此失败）
+		plg.ResolvedSDK = normalizeSDKVersion(readMetaVersion(sdkPath))
+	}
+
 	// Ensure go.mod exists with correct SDK path
 	sdkModule := ensureGoMod(plg, sdkPath)
 
@@ -269,6 +285,10 @@ func writePluginJSON(plg *PlgConfig, platforms []string, entry string) {
 	if len(plg.Tags) > 0 {
 		m["tags"] = plg.Tags
 	}
+	// 记录「用哪版 SDK 编的」：插件产物与内核协议绑定，出问题时这是第一个要看的字段。
+	if plg.ResolvedSDK != "" {
+		m["sdk"] = plg.ResolvedSDK
+	}
 	data, _ := json.MarshalIndent(m, "", "  ")
 	os.WriteFile("plugin.json", data, 0644)
 }
@@ -370,7 +390,28 @@ func ensureGoMod(plg *PlgConfig, sdkPath string) string {
 		}
 		keep = append(keep, line)
 	}
-	if alreadyExists {
+	// 同步 require 版本：replace 指向 1.2.1 而 require 还写 1.2.0 是自相矛盾的
+	// —— 有人删掉 replace 就会静默退回旧版本去编（`go list -m` 报的也是假版本）。
+	// 以本次真正选中的版本为准改写 require 行。
+	requireChanged := false
+	if v := normalizeSDKVersion(plg.ResolvedSDK); v != "" {
+		want := "require " + sdkModule + " v" + v
+		for i, line := range keep {
+			t := strings.TrimSpace(line)
+			if !strings.HasPrefix(t, "require ") {
+				continue
+			}
+			parts := strings.Fields(t)
+			if len(parts) >= 3 && parts[1] == sdkModule {
+				indent := line[:len(line)-len(strings.TrimLeft(line, " \t"))]
+				if t != want {
+					keep[i] = indent + want
+					requireChanged = true
+				}
+			}
+		}
+	}
+	if alreadyExists && !requireChanged {
 		return sdkModule
 	}
 	keep = append(keep, replaceLine, "")

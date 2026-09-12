@@ -34,6 +34,18 @@ type PlgConfig struct {
 	GoVersion   string            `json:"go_version,omitempty"`
 	Replaces    map[string]string `json:"replaces,omitempty"`
 	SourceDirs  []string          `json:"source_dirs,omitempty"`
+
+	// SDK 声明本插件针对的 SDK **接口版本**（中版本或完整版本，如 "1.2" / "1.2.1"）。
+	//
+	// 为何需要：工具链存储里可能装有多个 SDK 版本，而插件产物与内核是协议绑定的——
+	// 不给声明就只能猜（旧行为是直接用 current：谁改过 current 就拿谁的版本编，
+	// 出错时表现为莫名其妙的编译错误）。写中版本表示「只要 1.2 这条接口线，
+	// 补丁由工具链挑最新」（patch 只含工具链/打包修复，接口不变，见 README 版本语义）。
+	SDK string `json:"sdk,omitempty"`
+
+	// ResolvedSDK 是本次构建实际选中的 SDK 版本（build 按 SDK 声明解析后回填），
+	// 只写进产物里的 plugin.json，便于事后追溯「这个 .hmap 是哪版 SDK 编的」。
+	ResolvedSDK string `json:"-"`
 }
 
 // TargetList parses the Targets string into a slice.
@@ -159,6 +171,9 @@ func cmdInit(args []string) {
 		data.SDKModule = sdkMod
 		data.SDKVersion = "v" + sdkVer
 		data.SDKLocalPath = strings.ReplaceAll(sdkRoot, "\\", "/")
+		// 声明**完整版本号**：SDK 版本跟随内核中版本、patch 位恒为 .0，
+		// 一条内核线只对应一个 SDK 版本（build 时按此解析，见 ResolveSDKForProject）。
+		data.Plg.SDK = normalizeSDKVersion(sdkVer)
 	}
 
 	if err := os.MkdirAll(dir, 0755); err != nil {
