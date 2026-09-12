@@ -4,7 +4,7 @@ Plugin development SDK for building intelligent plugins that interact with the H
 
 ## Version and Compatibility
 
-Current: **SDK 1.1.0** (the media APIs need kernel **1.1.1+**; everything else works on kernel 1.0.0).
+Current: **SDK 1.2.0** (requires kernel **1.2.0+**).
 
 **The version tracks the kernel's minor version, with the patch position pinned at `.0`**:
 
@@ -24,6 +24,60 @@ in the "plugin calls, kernel implements" direction, so not calling it means not 
 (verified with an old `plugin.bin` built against SDK 0.9.2: it handshakes fine on the new kernel,
 because the handshake validates `ProtocolVersion`, not the SDK version). Rebuild only when you want
 the new fields.
+
+**Upgrading a 1.1.x plugin to 1.2.x: the interface is purely additive, but a rebuild is required.**
+No public signature changed (the SDK adds `InjectOptions`, six `*Opts` variants and
+`ChannelDef.ContextPolicy`), so not calling the new capabilities means not being affected — but the
+kernel's **plugin protocol went to 2** (the fd3 layout of the unified shared-memory region changed,
+and **rolling upgrades are not supported**). `plugin.bin` must therefore be rebuilt with the matching
+`plugindev` and installed **together with** the kernel; otherwise the handshake fails on protocol
+version mismatch (the error says explicitly to rebuild with the matching plugindev — it never
+degrades silently).
+
+## Injection Behaviour and Context Pruning (1.2.0)
+
+"Should this go into memory" and "should the context be pruned based on this" used to be
+something only `ToolDef` could declare. Since 1.2.0 **injections can declare them too**, sharing
+the same semantics and values.
+
+```go
+type InjectOptions struct {
+	NoMemory      bool   // true = excluded from memory computation (vectorize/keywords/distill); the
+	                     //        original text still stays in context
+	ContextPolicy string // ""/none = do not prune (default); prune = prune context based on this
+	CleanerName   string // name of the compute-layer cleaner: run it first to get the effective
+	                     // content, then compute/prune on that
+}
+
+const (
+	ContextPolicyNone  = "none"
+	ContextPolicyPrune = "prune"
+)
+
+// Six variants, one-to-one with the older three-argument methods, plus opts
+InjectTextOpts(source, channel, text string, opts InjectOptions)
+InjectInterruptTextOpts(source, channel, text string, opts InjectOptions)
+InjectInputSyncOpts(source, channel, text string, opts InjectOptions) string
+InjectInputMediaOpts(source, channel, text string, blocks []ContentBlock, opts InjectOptions)
+InjectInputMediaSyncOpts(source, channel, text string, blocks []ContentBlock, opts InjectOptions) string
+InjectInterruptMediaOpts(source, channel, text string, blocks []ContentBlock, opts InjectOptions)
+```
+
+Key points:
+
+- **A zero-valued `InjectOptions{}` is key-for-key equivalent to the older three-argument methods**
+  (recorded in memory, not pruned). The old methods remain as zero-value sugar (`InjectText`,
+  `InjectInterruptText`, `InjectTextNoMemory`, …), so existing plugins keep working without a single
+  line changed *or* a rebuild.
+- **Pruning (`prune`) must be declared explicitly**: it archives/drops low-relevance events, which
+  is a side effect, so it is off by default. The kernel only accepts `""` / `none` / `prune`
+  (`ValidContextPolicy`); anything else is rejected.
+- Pruning first goes through the plugin's registered **`Cleaner`** (named by `CleanerName`) to get
+  the effective content, avoiding the inconsistency of "prune on the raw text, compute on the
+  cleaned text".
+- `ChannelDef` carries the same `context_policy` (1.2.0 also gave `ChannelDef` JSON tags — the
+  definition crosses the process boundary, while `Cleaner` is a function that must be ignored; with
+  no tags, newly added fields would be silently dropped).
 
 ## SDK API Surface
 
@@ -421,6 +475,13 @@ Internal plugins (platform built-in) have full SDK access including SocialAPI wr
 | [ocr](example/ocr) | Go | Optical character recognition |
 | [rss](example/rss) | Go | RSS subscriptions |
 | [sanitizer](example/sanitizer) | Go | Content sanitization / safety filtering |
+
+**Prebuilt example artifacts ship with every release**: besides the 5-platform `plugindev`, an SDK
+release contains the example plugins' `.hmap` files plus `SHA256SUMS`/`MANIFEST.txt`. The reason is
+that plugin binaries are **protocol-bound** to the kernel (`ProtocolVersion` + the shared-memory
+magic), so shipping the toolchain without matching artifacts invites installing an old artifact —
+which fails the handshake and looks like "the plugin is broken" rather than "the versions don't
+match".
 
 ## Remote Device SDK
 

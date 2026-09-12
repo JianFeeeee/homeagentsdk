@@ -4,7 +4,7 @@ HomeAgent 插件开发 SDK，用于构建与 HomeAgent 平台交互的智能插�
 
 ## 版本与兼容性
 
-当前：**SDK 1.1.0**（需要内核 **1.1.1+** 才能用媒体接口；媒体之外的能力内核 1.0.0 即可）。
+当前：**SDK 1.2.0**（需内核 **1.2.0+**）。
 
 **版本号跟随内核的中版本，patch 位恒为 `.0`**：
 
@@ -21,6 +21,50 @@ HomeAgent 插件开发 SDK，用于构建与 HomeAgent 平台交互的智能插�
 「插件调用、内核实现」方向，不调就不受影响（已用 SDK 0.9.2 编的旧 `plugin.bin`
 实测验证：在新内核上直接建链通过，因为握手校验的是 `ProtocolVersion`、不是 SDK 版本）。
 想用新字段时重编即可。
+
+**1.1.x 插件升到 1.2.x：接口纯追加，但必须重编。** 公开接口没有签名变更（新增
+`InjectOptions` 与六个 `*Opts` 变体、`ChannelDef.ContextPolicy`），不调新能力就不受影响；
+但内核的**插件运行协议升到了 2**（统一共享内存区的 fd3 布局改变，**不支持滚动升级**），
+所以 `plugin.bin` 必须用配套的 `plugindev` 重编后与内核**同批**安装——否则握手时协议版本
+不匹配会被拒绝（错误信息会明确提示用配套 plugindev 重编，不会静默降级）。
+
+## 注入行为与上下文裁剪（1.2.0）
+
+「记不记入记忆」与「要不要据此裁剪上下文」这两件事，原先只有 `ToolDef` 能声明；
+1.2.0 起**注入侧也能声明**，并且二者共用同一套语义与取值。
+
+```go
+type InjectOptions struct {
+	NoMemory      bool   // true = 不参与记忆计算（向量化/关键词提取/蒸馏），原文仍留在上下文
+	ContextPolicy string // ""/none = 不裁剪（默认）；prune = 据此裁剪上下文
+	CleanerName   string // 计算层过滤函数名：先经 Cleaner 得到实际有效内容，再计算/裁剪
+}
+
+const (
+	ContextPolicyNone  = "none"
+	ContextPolicyPrune = "prune"
+)
+
+// 六个变体，与旧的三参数方法一一对应，只多一个 opts
+InjectTextOpts(source, channel, text string, opts InjectOptions)
+InjectInterruptTextOpts(source, channel, text string, opts InjectOptions)
+InjectInputSyncOpts(source, channel, text string, opts InjectOptions) string
+InjectInputMediaOpts(source, channel, text string, blocks []ContentBlock, opts InjectOptions)
+InjectInputMediaSyncOpts(source, channel, text string, blocks []ContentBlock, opts InjectOptions) string
+InjectInterruptMediaOpts(source, channel, text string, blocks []ContentBlock, opts InjectOptions)
+```
+
+要点：
+
+- **零值 `InjectOptions{}` 与旧的三参数方法逐键等价**（记入记忆 + 不裁剪）。旧方法保留为
+  零值糖（`InjectText` / `InjectInterruptText` / `InjectTextNoMemory` …），存量插件不改一行、
+  不需重编即可继续调用。
+- **裁剪（`prune`）必须显式声明**：它会归档丢弃低相关事件，是有副作用的行为，故默认关闭。
+  内核只放行 `""` / `none` / `prune`（`ValidContextPolicy`），未声明的取值会被拒。
+- 裁剪前先经该插件注册的 **`Cleaner`**（由 `CleanerName` 指定）拿到实际有效内容，
+  避开「按原文裁剪、按清洗后计算」这种不一致。
+- `ChannelDef` 也有同名 `context_policy`（并且 1.2.0 给它补上了 JSON tag——通道定义要跨进程
+  传给内核，而 `Cleaner` 是函数必须忽略；无 tag 时新增字段会被静默丢掉）。
 
 ## SDK API 接口
 
@@ -443,6 +487,11 @@ ctx.Unlock()
 | [ocr](example/ocr) | Go | 光学字符识别 |
 | [rss](example/rss) | Go | RSS 订阅 |
 | [sanitizer](example/sanitizer) | Go | 内容清洗/安全过滤 |
+
+**发版时附带预编译示例产物**：SDK 的 release 除 5 平台 `plugindev` 外，还包含各示例插件的
+`.hmap` 与 `SHA256SUMS`/`MANIFEST.txt`。原因是插件二进制与内核**协议绑定**（`ProtocolVersion`
++ 共享内存区魔数），只发工具链不发示例产物，很容易拿旧产物去装而握手失败——那看起来像
+「插件坏了」而不是「版本不配套」。
 
 ## Remote Device SDK
 
