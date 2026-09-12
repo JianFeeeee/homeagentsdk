@@ -1,0 +1,11 @@
+module vikunja-plugin
+
+go 1.25.0
+
+require gitcode.com/JianFeeeee/homeagent-sdk v1.2.0
+
+// 与同目录其它示例一致：SDK 指向仓库内的 vendored 副本
+
+
+
+replace gitcode.com/JianFeeeee/homeagent-sdk => /root/.homeagent/hmapdev/sdk/v1.2.0
