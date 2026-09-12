@@ -1,0 +1,174 @@
+{
+  "name": "hmapdev-vscode",
+  "displayName": "HomeAgent Plugin Dev (hmapdev)",
+  "description": "调试与构建 HomeAgent 插件工程：plg.json 校验、SDK 版本解析、hmapdev 构建/运行、内核日志跟随。",
+  "version": "0.1.0",
+  "publisher": "JianFeeeee",
+  "license": "AGPL-3.0-only",
+  "private": true,
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Debuggers",
+    "Other"
+  ],
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "workspaceContains:plg.json",
+    "workspaceContains:**/plg.json"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "hmapdev.build",
+        "title": "hmapdev: 构建插件"
+      },
+      {
+        "command": "hmapdev.buildAll",
+        "title": "hmapdev: 构建插件（全部目标平台）"
+      },
+      {
+        "command": "hmapdev.clean",
+        "title": "hmapdev: 清理产物"
+      },
+      {
+        "command": "hmapdev.run",
+        "title": "hmapdev: 运行插件（解释执行，快速迭代）"
+      },
+      {
+        "command": "hmapdev.showVersion",
+        "title": "hmapdev: 查看工具链版本"
+      },
+      {
+        "command": "hmapdev.listSdk",
+        "title": "hmapdev: 列出 SDK 版本"
+      },
+      {
+        "command": "hmapdev.installSdk",
+        "title": "hmapdev: 安装 SDK 版本…"
+      },
+      {
+        "command": "hmapdev.useSdk",
+        "title": "hmapdev: 切换当前 SDK 版本…"
+      },
+      {
+        "command": "hmapdev.tailKernelLog",
+        "title": "hmapdev: 跟随内核日志（按插件过滤）"
+      },
+      {
+        "command": "hmapdev.stopTailKernelLog",
+        "title": "hmapdev: 停止跟随内核日志"
+      },
+      {
+        "command": "hmapdev.openPlgJson",
+        "title": "hmapdev: 打开 plg.json"
+      },
+      {
+        "command": "hmapdev.refresh",
+        "title": "hmapdev: 刷新状态（重新探测工具链与 SDK）"
+      }
+    ],
+    "configuration": {
+      "title": "HomeAgent Plugin Dev",
+      "properties": {
+        "hmapdev.path": {
+          "type": "string",
+          "default": "hmapdev",
+          "description": "hmapdev 可执行文件路径（默认从 PATH 找）。"
+        },
+        "hmapdev.kernelDataDir": {
+          "type": "string",
+          "default": "",
+          "description": "内核数据目录（homed -data 的那个目录）。填了才能跟随内核日志调试；留空则「跟随内核日志」会先询问。"
+        },
+        "hmapdev.diagnoseSdk": {
+          "type": "boolean",
+          "default": true,
+          "description": "校验 plg.json 里声明的 SDK 版本是否已安装在本地 SDK 存储（需要能执行 hmapdev）。"
+        }
+      }
+    },
+    "taskDefinitions": [
+      {
+        "type": "hmapdev",
+        "required": [
+          "action"
+        ],
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "build",
+              "buildAll",
+              "clean",
+              "run"
+            ],
+            "description": "要执行的 hmapdev 动作。"
+          },
+          "cwd": {
+            "type": "string",
+            "description": "插件工程目录（默认取 plg.json 所在目录）。"
+          }
+        }
+      }
+    ],
+    "problemMatchers": [
+      {
+        "name": "hmapdev-go",
+        "owner": "go",
+        "source": "hmapdev",
+        "fileLocation": [
+          "relative",
+          "${workspaceFolder}"
+        ],
+        "pattern": [
+          {
+            "regexp": "^(.+\\.go):(\\d+):(\\d+):\\s+(.+)$",
+            "file": 1,
+            "line": 2,
+            "column": 3,
+            "message": 4
+          },
+          {
+            "regexp": "^(.+\\.go):(\\d+):\\s+(.+)$",
+            "file": 1,
+            "line": 2,
+            "message": 3
+          }
+        ]
+      }
+    ],
+    "languages": [
+      {
+        "id": "json",
+        "filenames": [
+          "plg.json"
+        ]
+      }
+    ],
+    "jsonValidation": [
+      {
+        "fileMatch": "plg.json",
+        "url": "./schema/plg.schema.json"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "json",
+        "path": "./snippets/plg.json.code-snippets"
+      }
+    ]
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "test": "tsc -p ./ && node --test out/test/*.test.js"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.6.0"
+  }
+}
