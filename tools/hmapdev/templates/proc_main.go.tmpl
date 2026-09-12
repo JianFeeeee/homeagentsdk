@@ -287,6 +287,10 @@ func applyInjectOpts(args map[string]interface{}, opts sdk.InjectOptions) {
 	if opts.CleanerName != "" {
 		args["cleaner_name"] = opts.CleanerName
 	}
+	// priority 只对中断注入有意义（排队注入没有级别）。
+	if opts.Priority != "" {
+		args["priority"] = opts.Priority
+	}
 }
 
 // ---- 全局状态 ----
