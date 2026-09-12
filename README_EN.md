@@ -747,3 +747,19 @@ curl -X POST http://127.0.0.1:9876/plugins \
 ```
 
 Or upload via the WebUI plugin management page, or manually place the `.hmap` in the plugin directory and restart the platform.
+
+## License
+
+The SDK is released under **AGPL-3.0-only** — see [LICENSE](LICENSE).
+
+**This is a substantive constraint for plugin developers**: the SDK is **statically linked** into
+your plugin (its source ends up in the plugin binary), so the plugin is a derivative work of
+this SDK and **must be released under the same license**. Because AGPL §13 covers network
+interaction, a plugin that serves users over HTTP/WebSocket must also offer them the source.
+If you need a closed-source plugin, the only compliant route is a separate exception/commercial
+license from this project — none is offered today.
+
+Third-party components (Go dependencies: go-sqlite3, gojieba, bubbletea, … — MIT / BSD-3 /
+Apache-2.0) keep their own licenses. The platform-side model and inference runtime
+(Chinese-CLIP Apache-2.0, ONNX Runtime MIT) are not part of this SDK; their full license texts
+ship with the release packages under `/usr/share/doc/homeagent/licenses/`.

@@ -788,3 +788,16 @@ curl -X POST http://127.0.0.1:9876/plugins \
 ```
 
 或通过 WebUI 插件管理页面上传，也可手动将 `.hmap` 放入插件目录后重启平台。
+
+## 许可
+
+SDK 以 **AGPL-3.0-only** 发布，全文见 [LICENSE](LICENSE)。
+
+**这对插件开发者是实质性约束**：SDK 会随插件一起**静态链接**（其源码进入插件二进制），
+插件因此是本 SDK 的衍生作品，**必须以相同许可（AGPL-3.0-only）发布**；并且因为 AGPL §13
+覆盖网络交互，通过 HTTP/WebSocket 等向用户提供服务的插件同样要向使用者提供源码。
+若你的插件需要闭源，唯一合规路径是另行取得本项目的例外/商业授权——目前不提供。
+
+第三方组件（Go 依赖：go-sqlite3、gojieba、bubbletea 等，均为 MIT / BSD-3 / Apache-2.0）
+保持各自原有许可。平台侧的模型与推理运行时（Chinese-CLIP Apache-2.0、ONNX Runtime MIT）
+不属于本 SDK，其许可全文随发行包放在 `/usr/share/doc/homeagent/licenses/`。
