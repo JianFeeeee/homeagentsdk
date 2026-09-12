@@ -473,6 +473,57 @@ ctx.Unlock()
 
 内部插件（平台内置）拥有完整 SDK 访问权限，包括 SocialAPI 写操作和 EventPublisher。
 
+## 项目声明 SDK 版本（plg.json 的 `sdk` 字段）
+
+`hmapdev init` 生成的工程里，`plg.json` 会带一个 `sdk` 字段：
+
+```json
+{
+  "name": "MyPlugin",
+  "version": "0.1.0",
+  "entry": "plugin.bin",
+  "sdk": "1.2.0"
+}
+```
+
+它的语义是**本插件针对的 SDK 版本**，工具链据此在本地 SDK 存储里选择版本：
+命中就用它，并把 `go.mod` 的 `require`/`replace` 同步到该版本；未命中则**明确报错**
+（列出已装版本 + `hmapdev sdk install vX.Y.Z`），**绝不静默退化成 `current`**。
+
+```bash
+$ hmapdev build
+[hmapdev] SDK 1.2.0（项目声明 sdk=1.2.0）
+```
+
+为什么要这个字段：以前项目里没有任何「我要哪版 SDK」的声明，工具链只能用存储里的
+`current`——谁改过 `current` 就拿谁的版本编，出错时表现为一堆看不懂的编译错误
+（例如存储里只有陈旧的 `v0.8.0` 时，模板项目首次构建会报 `undefined: sdk.InjectOptions`）。
+
+**写法必须是完整版本号（`1.2.0`），不接受区间写法（`1.2`）。** 原因见上文的版本纪律：
+SDK 版本跟随内核中版本、patch 位恒为 `.0`，一条内核线只对应一个 SDK 版本；
+写区间会让人误以为同一条线里还能挑不同 SDK（工具链会直接拒绝并说明这条规矩）。
+
+- 显式 `--sdk-path` 或 `plg.json` 的 `sdk_path` 优先（本机改 SDK 联调时用）；
+- 存量工程（`plg.json` 没有 `sdk` 字段）行为不变，仍按 `current` 构建；
+- 产物 `.hmap` 里的 `plugin.json` 会记录**实际选中的 SDK 版本**，便于事后追溯。
+
+## IDE 支持：VSCode 扩展（`tools/vscode-hmapdev`）
+
+调试插件的实操回路是「构建 → 运行 → 看内核日志」，这三步都在 IDE 之外很别扭，
+所以仓库里带了一个 VSCode 扩展（[tools/vscode-hmapdev](tools/vscode-hmapdev)）：
+
+- **plg.json 诊断**：必需字段、`sdk` 是否是完整版本号、声明的 SDK 是否已安装（直接给安装命令）；
+- **状态栏**：`插件 · SDK <声明> · hmapdev <版本>`，工具链缺失或工程有错时变色；
+- **命令 / 任务**：build / build（全部目标）/ clean / debug（解释执行），编译错误进 Problems；
+- **跟随内核日志**：读 `<dataDir>/log` 下最新的 `homed_*.log` 并按插件名过滤。
+
+```bash
+cd tools/vscode-hmapdev && npm install && npm run compile   # 然后在 VSCode 里按 F5
+```
+
+它不是源码级调试器（没有断点/单步）：插件要么编译成产物在内核里跑、要么用
+`hmapdev debug` 解释执行，两条路都没有 DAP 会话；扩展做的是构建、运行、看日志与清单校验。
+
 ## 示例插件
 
 | 插件 | 类型 | 说明 |

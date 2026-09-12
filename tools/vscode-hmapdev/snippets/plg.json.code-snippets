@@ -1,0 +1,26 @@
+{
+  "plg.json 骨架": {
+    "prefix": "plg",
+    "body": [
+      "{",
+      "  \"name\": \"${1:MyPlugin}\",",
+      "  \"name_zh\": \"${2:中文名}\",",
+      "  \"name_en\": \"${1:MyPlugin}\",",
+      "  \"version\": \"0.1.0\",",
+      "  \"description\": \"${3:插件说明}\",",
+      "  \"author\": \"${4:HomeAgent}\",",
+      "  \"entry\": \"plugin.bin\",",
+      "  \"sdk\": \"${5:1.2.0}\",",
+      "  \"tags\": [\"${1:MyPlugin}\"],",
+      "  \"targets\": \"linux/amd64,darwin/arm64\"",
+      "}",
+      "$0"
+    ],
+    "description": "plg.json 必需字段骨架（sdk 必须是完整版本号）"
+  },
+  "sdk 字段": {
+    "prefix": "sdk",
+    "body": ["\"sdk\": \"${1:1.2.0}\","],
+    "description": "声明本插件针对的 SDK 版本（完整版本号；patch 位恒为 .0）"
+  }
+}

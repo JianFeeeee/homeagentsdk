@@ -1,0 +1,41 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "HomeAgent 插件清单（plg.json）",
+  "type": "object",
+  "required": ["name", "version", "entry"],
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "插件名（与目录名一致最省事）"
+    },
+    "name_zh": { "type": "string", "description": "中文显示名" },
+    "name_en": { "type": "string", "description": "英文显示名" },
+    "version": { "type": "string", "description": "插件自身版本号（如 0.1.0），与内核/SDK 版本无关" },
+    "description": { "type": "string" },
+    "author": { "type": "string" },
+    "entry": {
+      "type": "string",
+      "description": "入口产物文件名（子进程模式通常是 plugin.bin；Lua 是 main.lua）"
+    },
+    "sdk": {
+      "type": "string",
+      "pattern": "^v?\\d+\\.\\d+\\.\\d+$",
+      "description": "本插件针对的 SDK 版本，必须是完整版本号（如 1.2.0）。SDK 版本跟随内核中版本、patch 位恒为 .0，一条内核线只有一个 SDK 版本；工具链按此在本地 SDK 存储里选择版本。"
+    },
+    "tags": { "type": "array", "items": { "type": "string" } },
+    "targets": {
+      "type": "string",
+      "description": "目标平台，逗号分隔，如 linux/amd64,darwin/arm64（windows 目标暂不支持插件产物）"
+    },
+    "outdir": { "type": "string", "description": "产物目录（默认 dist）" },
+    "bundle": { "type": "boolean", "description": "是否打包成 .hmap（默认 true）" },
+    "sdk_path": {
+      "type": "string",
+      "description": "直接指定 SDK 源码目录（本机改 SDK 联调时用）；设置后优先于 sdk 字段"
+    },
+    "go_version": { "type": "string" },
+    "replaces": { "type": "object", "additionalProperties": { "type": "string" } },
+    "source_dirs": { "type": "array", "items": { "type": "string" } }
+  },
+  "additionalProperties": true
+}
