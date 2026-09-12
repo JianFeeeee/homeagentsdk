@@ -92,8 +92,9 @@ func TestProcTemplate_CoversAllCoreMethods(t *testing.T) {
 	required := []string{
 		// 注册面
 		"tool.register", "stage.register", "output.register", "api.register", "input.register",
-		// IO 注入
-		"io.injectText", "io.injectInterrupt", "io.injectTextNoMem", "io.injectInputSync",
+		// IO 注入（io.injectTextNoMem 见下方 deprecated：内核保留为兼容旧二进制，
+		// 当前模板改走 io.injectText + NoMemory 标志位，不再发那个 id）
+		"io.injectText", "io.injectInterrupt", "io.injectInputSync",
 		"io.setToolBlocks",
 		// 多模态注入（1.1.0 新增）。漏接线的后果是插件调 InjectInputMedia 静默无效果：
 		// 模板不发这个 RPC，内核也就永远收不到，而两边都不报错。
@@ -129,6 +130,28 @@ func TestProcTemplate_CoversAllCoreMethods(t *testing.T) {
 	for _, m := range required {
 		if !strings.Contains(src, `"`+m+`"`) {
 			t.Errorf("模板缺少 core method %q（内核已提供，插件侧未接线）", m)
+		}
+	}
+
+	// 内核保留、但**当前模板不再发送**的 method id。
+	//
+	// 它们不是「公开接口新增却忘记接线」，而是刻意的向后兼容面：
+	// 内核必须继续接受用旧模板编出的插件二进制发来的 id，而当前模板没有理由再发。
+	//
+	// 可复查的判据：ba49dfd 之前的模板里 InjectTextNoMemory 发的就是
+	// "io.injectTextNoMem"；注入标志位落地后它改走 "io.injectText" + NoMemory。
+	//
+	// 为何要单独列而不是直接从 required 删掉：这条守卫的价值在于「新接口必须接线」，
+	// 而把「内核有、模板就必须发」当不变量，会让它常驻误报——常驻误报的守卫迟早
+	// 被人习惯性忽略，那时真漏接线也就没人看见了。
+	deprecated := map[string]string{
+		"io.injectTextNoMem": "旧模板经此表达「不进记忆」；现由 io.injectText + NoMemory 表达",
+	}
+	// 反向保护：allowlist 条目一旦又出现在模板里，说明它已过期，必须删掉，
+	// 否则这里会悄悄变成「永久豁免」的垃圾抽屉。
+	for m, why := range deprecated {
+		if strings.Contains(src, `"`+m+`"`) {
+			t.Errorf("deprecated 里的 %q 又出现在模板里（%s）——条目已过期，请从 deprecated 移除", m, why)
 		}
 	}
 }
