@@ -110,6 +110,11 @@ type IOInjector interface {
 	InjectInterruptText(source, channel, text string)
 	InjectText(source, channel, text string)
 	InjectTextNoMemory(source, channel, text string)
+	// InjectInputSync 注入输入事件并同步等待 agent 回复（无回复时返回空串）。
+	// 通道类插件（qq / a2a 等）靠它完成「收到入站 → agent 处理 → 回复取回」闭环，
+	// 而 mock 此前只有带 flags 的 InjectInputSyncOpts、没有这个零值糖——
+	// 于是一个能在 plugin.bin 里编译通过、在 yaegi 下却调不通的方法就长住了。
+	InjectInputSync(source, channel, text string) string
 	// 1.1.0 媒体注入。与公共 SDK 同构：插件在 yaegi 下调得通的方法，
 	// 编成 plugin.bin 后必须也调得通，否则调试期与真实运行行为不一致。
 	InjectInputMedia(source, channel, text string, blocks []ContentBlock)
@@ -415,6 +420,11 @@ func (IOInjectorImpl) SetToolBlocks(blocks []ContentBlock) {
 }
 
 // ---- 带 InjectOptions 的注入 ----
+
+func (IOInjectorImpl) InjectInputSync(source, channel, text string) string {
+	logf("inject_sync: source=%s channel=%s", source, channel)
+	return ""
+}
 
 func (IOInjectorImpl) InjectTextOpts(source, channel, text string, opts InjectOptions) {
 	logf("inject_text_opts: source=%s channel=%s no_memory=%v policy=%s", source, channel, opts.NoMemory, opts.ContextPolicy)
