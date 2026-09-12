@@ -61,7 +61,7 @@ var (
 	// SDKName 是 SDK 名称。
 	SDKName = "HomeAgent SDK"
 
-	// CoreModule 是核心仓的 Go module path，供 plugindev 生成 go.mod 时使用。
+	// CoreModule 是核心仓的 Go module path，供 hmapdev 生成 go.mod 时使用。
 	CoreModule = "gitcode.com/JianFeeeee/HomeAgent"
 
 	// CoreVersion 是此 SDK 所兼容的最低核心版本。

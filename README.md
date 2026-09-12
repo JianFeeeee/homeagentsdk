@@ -25,8 +25,8 @@ HomeAgent 插件开发 SDK，用于构建与 HomeAgent 平台交互的智能插�
 **1.1.x 插件升到 1.2.x：接口纯追加，但必须重编。** 公开接口没有签名变更（新增
 `InjectOptions` 与六个 `*Opts` 变体、`ChannelDef.ContextPolicy`），不调新能力就不受影响；
 但内核的**插件运行协议升到了 2**（统一共享内存区的 fd3 布局改变，**不支持滚动升级**），
-所以 `plugin.bin` 必须用配套的 `plugindev` 重编后与内核**同批**安装——否则握手时协议版本
-不匹配会被拒绝（错误信息会明确提示用配套 plugindev 重编，不会静默降级）。
+所以 `plugin.bin` 必须用配套的 `hmapdev` 重编后与内核**同批**安装——否则握手时协议版本
+不匹配会被拒绝（错误信息会明确提示用配套 hmapdev 重编，不会静默降级）。
 
 ## 注入行为与上下文裁剪（1.2.0）
 
@@ -284,18 +284,23 @@ func New(name string, sett SettingsAPI, regTool ToolRegistrar, regStage StageReg
 
 插件开发者只需实现 `Plugin` 接口并导出 `NewPluginFactory()` 入口函数。
 
-## plugindev 工具链
+## hmapdev 工具链
 
-`plugindev` 提供插件开发全流程支持。预编译二进制作为 **release 附件**分发（linux/darwin/windows × amd64/arm64），从
+`hmapdev` 提供插件开发全流程支持，最终产出 `.hmap` 插件包（工具名即来自该包格式）。
+预编译二进制作为 **release 附件**分发（linux/darwin/windows × amd64/arm64），从
 [Releases](https://gitcode.com/JianFeeeee/homeagent-sdk/releases) 下载后加入 PATH 即可：
 
+> 改名说明：工具链原名 `plugindev`，自 1.2.0 起更名 `hmapdev`。
+> SDK 存储目录同时由 `~/.homeagent/plugindev/sdk` 迁到 `~/.homeagent/hmapdev/sdk`
+> （旧目录会被自动沿用，不会丢已装版本）。
+
 ```bash
-# 从 release 附件下载（以 v1.1.0 / linux amd64 为例）
-curl -Lo plugindev https://gitcode.com/JianFeeeee/homeagent-sdk/releases/download/v1.1.0/plugindev_linux_amd64
-chmod +x plugindev
+# 从 release 附件下载（以最新 SDK 发布 / linux amd64 为例）
+curl -Lo hmapdev https://gitcode.com/JianFeeeee/homeagent-sdk/releases/download/<版本>/hmapdev_linux_amd64
+chmod +x hmapdev
 
 # 或从源码自己编
-cd tools/plugindev && go build -o plugindev .
+cd tools/hmapdev && go build -o hmapdev .
 ```
 
 > 二进制不再随仓库分发（旧的 `bin/` 目录已停用）：5 个平台各 26-28MB，
@@ -303,11 +308,11 @@ cd tools/plugindev && go build -o plugindev .
 
 | 命令 | 说明 |
 |------|------|
-| `plugindev init <name> [--lua]` | 初始化插件项目（生成 plg.json、plugin.go 或 main.lua、go.mod、README.md） |
-| `plugindev build [flags]` | 编译并打包为 `.hmap` 包（支持跨平台编译和 bundle 模式） |
-| `plugindev clean` | 清理 `build/`、`dist/` 目录及生成文件（plugin.json、z_bridge_gen.go） |
-| `plugindev debug [dir]` | 通过 Yaegi Go 解释器加载插件源码，启动交互式 REPL 调试 |
-| `plugindev sdk <command>` | SDK 版本管理（子命令：list/install/use/path/current/latest） |
+| `hmapdev init <name> [--lua]` | 初始化插件项目（生成 plg.json、plugin.go 或 main.lua、go.mod、README.md） |
+| `hmapdev build [flags]` | 编译并打包为 `.hmap` 包（支持跨平台编译和 bundle 模式） |
+| `hmapdev clean` | 清理 `build/`、`dist/` 目录及生成文件（plugin.json、z_bridge_gen.go） |
+| `hmapdev debug [dir]` | 通过 Yaegi Go 解释器加载插件源码，启动交互式 REPL 调试 |
+| `hmapdev sdk <command>` | SDK 版本管理（子命令：list/install/use/path/current/latest） |
 
 支持 **Go** 和 **Lua** 两种插件语言。
 
@@ -414,7 +419,7 @@ return plugin
 
 - `sdk.RegisterOnRemoveHandler(fn func())` — 注册删除清理回调。内核在 `RemovePlugin` 流程中、插件 `Stop()` **之后**执行（后注册先执行，执行后清空、幂等）。用于删除插件自身创建的持久化文件（数据/缓存/状态文件）。
 - 内核卸载时一并清理：工具注册、`disabled_plugins` 记录、插件配置项定义（`plugin.<name>.*`）与插件配置表（`config_<name>`），卸载后插件配置区完全消失。
-- 示例：`example/calendar`（删 events.json）、`example/memo`（删 memos.json）、`example/rss`（删订阅数据目录）、`example/weather`（删缓存目录）；`plugindev` 模板含 onRemove 演示。
+- 示例：`example/calendar`（删 events.json）、`example/memo`（删 memos.json）、`example/rss`（删订阅数据目录）、`example/weather`（删缓存目录）；`hmapdev` 模板含 onRemove 演示。
 
 ```go
 sdk.RegisterOnRemoveHandler(func() {
@@ -488,7 +493,7 @@ ctx.Unlock()
 | [rss](example/rss) | Go | RSS 订阅 |
 | [sanitizer](example/sanitizer) | Go | 内容清洗/安全过滤 |
 
-**发版时附带预编译示例产物**：SDK 的 release 除 5 平台 `plugindev` 外，还包含各示例插件的
+**发版时附带预编译示例产物**：SDK 的 release 除 5 平台 `hmapdev` 外，还包含各示例插件的
 `.hmap` 与 `SHA256SUMS`/`MANIFEST.txt`。原因是插件二进制与内核**协议绑定**（`ProtocolVersion`
 + 共享内存区魔数），只发工具链不发示例产物，很容易拿旧产物去装而握手失败——那看起来像
 「插件坏了」而不是「版本不配套」。
@@ -594,10 +599,10 @@ ha_transport_t my_transport = {
 
 ### 使用方式
 
-通过 `plugindev` 工具链初始化项目：
+通过 `hmapdev` 工具链初始化项目：
 
 ```bash
-plugindev init my-adapter --type remotedevice
+hmapdev init my-adapter --type remotedevice
 ```
 
 生成 `main.c` + `CMakeLists.txt`，可直接编译或作为三方库引入：
@@ -809,17 +814,17 @@ curl -X POST http://<homeagent-server>:8080/api/v1/device/esp32-cam-1/cmd \
 ### 位置
 
 - **SDK 源码**: `remotedevice/`
-- **plugindev 模板**: `plugindev init --type remotedevice`
+- **hmapdev 模板**: `hmapdev init --type remotedevice`
 
 ## 构建与安装
 
 ### 构建
 
 ```bash
-plugindev build
+hmapdev build
 ```
 
-输出 `.hmap` 包到 `dist/` 目录（默认 bundle 多平台合集；单平台构建使用 `plugindev build --no-bundle`）。
+输出 `.hmap` 包到 `dist/` 目录（默认 bundle 多平台合集；单平台构建使用 `hmapdev build --no-bundle`）。
 
 ### 安装
 

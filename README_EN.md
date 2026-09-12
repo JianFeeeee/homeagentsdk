@@ -30,8 +30,8 @@ No public signature changed (the SDK adds `InjectOptions`, six `*Opts` variants 
 `ChannelDef.ContextPolicy`), so not calling the new capabilities means not being affected — but the
 kernel's **plugin protocol went to 2** (the fd3 layout of the unified shared-memory region changed,
 and **rolling upgrades are not supported**). `plugin.bin` must therefore be rebuilt with the matching
-`plugindev` and installed **together with** the kernel; otherwise the handshake fails on protocol
-version mismatch (the error says explicitly to rebuild with the matching plugindev — it never
+`hmapdev` and installed **together with** the kernel; otherwise the handshake fails on protocol
+version mismatch (the error says explicitly to rebuild with the matching hmapdev — it never
 degrades silently).
 
 ## Injection Behaviour and Context Pruning (1.2.0)
@@ -303,19 +303,24 @@ func New(name string, sett SettingsAPI, regTool ToolRegistrar, regStage StageReg
 
 Plugin developers only need to implement the `Plugin` interface and export a `NewPlugin()` entry function.
 
-## plugindev Toolchain
+## hmapdev Toolchain
 
-`plugindev` provides full development workflow support. Prebuilt binaries ship as **release assets**
+`hmapdev` provides full development workflow support and produces `.hmap` plugin bundles (the tool is
+named after that package format). Prebuilt binaries ship as **release assets**
 (linux/darwin/windows × amd64/arm64); download from
 [Releases](https://gitcode.com/JianFeeeee/homeagent-sdk/releases) and put it on your PATH:
 
+> Rename note: the toolchain was called `plugindev` and is `hmapdev` since 1.2.0.
+> The SDK store moved from `~/.homeagent/plugindev/sdk` to `~/.homeagent/hmapdev/sdk`
+> (the old directory is still honored, so installed versions are not lost).
+
 ```bash
-# From release assets (v1.1.0 / linux amd64 shown)
-curl -Lo plugindev https://gitcode.com/JianFeeeee/homeagent-sdk/releases/download/v1.1.0/plugindev_linux_amd64
-chmod +x plugindev
+# From release assets (latest SDK release / linux amd64 shown)
+curl -Lo hmapdev https://gitcode.com/JianFeeeee/homeagent-sdk/releases/download/<version>/hmapdev_linux_amd64
+chmod +x hmapdev
 
 # Or build from source
-cd tools/plugindev && go build -o plugindev .
+cd tools/hmapdev && go build -o hmapdev .
 ```
 
 > Binaries no longer ship inside the repository (the old `bin/` directory is retired): five
@@ -324,11 +329,11 @@ cd tools/plugindev && go build -o plugindev .
 
 | Command | Description |
 |---------|-------------|
-| `plugindev init <name> [--lua]` | Initialize plugin project (generates plg.json, plugin.go or main.lua, go.mod, README.md) |
-| `plugindev build [flags]` | Build and package into a `.hmap` (supports cross-compilation and bundle mode) |
-| `plugindev clean` | Clean `build/` and `dist/` plus generated files |
-| `plugindev debug [dir]` | Load plugin source through the Yaegi Go interpreter and start an interactive REPL |
-| `plugindev sdk <command>` | SDK version management (list/install/use/path/current/latest) |
+| `hmapdev init <name> [--lua]` | Initialize plugin project (generates plg.json, plugin.go or main.lua, go.mod, README.md) |
+| `hmapdev build [flags]` | Build and package into a `.hmap` (supports cross-compilation and bundle mode) |
+| `hmapdev clean` | Clean `build/` and `dist/` plus generated files |
+| `hmapdev debug [dir]` | Load plugin source through the Yaegi Go interpreter and start an interactive REPL |
+| `hmapdev sdk <command>` | SDK version management (list/install/use/path/current/latest) |
 
 Supports both **Go** and **Lua** plugin languages.
 
@@ -400,7 +405,7 @@ Supports both **Go** and **Lua** plugin languages.
 
 - `sdk.RegisterOnRemoveHandler(fn func())` — Register a remove cleanup callback. The kernel runs it **after** the plugin's `Stop()` in the `RemovePlugin` flow (LIFO order, cleared after running — idempotent). Use it to delete persistent files the plugin created itself (data/cache/state files).
 - The kernel also cleans up on uninstall: tool registrations, the `disabled_plugins` record, the plugin's config definitions (`plugin.<name>.*`) and its config table (`config_<name>`) — the plugin's config section disappears completely after removal.
-- Examples: `example/calendar` (removes events.json), `example/memo` (removes memos.json), `example/rss` (removes the subscription data dir), `example/weather` (removes the cache dir); the `plugindev` template includes an onRemove demo.
+- Examples: `example/calendar` (removes events.json), `example/memo` (removes memos.json), `example/rss` (removes the subscription data dir), `example/weather` (removes the cache dir); the `hmapdev` template includes an onRemove demo.
 
 ```go
 sdk.RegisterOnRemoveHandler(func() {
@@ -476,7 +481,7 @@ Internal plugins (platform built-in) have full SDK access including SocialAPI wr
 | [rss](example/rss) | Go | RSS subscriptions |
 | [sanitizer](example/sanitizer) | Go | Content sanitization / safety filtering |
 
-**Prebuilt example artifacts ship with every release**: besides the 5-platform `plugindev`, an SDK
+**Prebuilt example artifacts ship with every release**: besides the 5-platform `hmapdev`, an SDK
 release contains the example plugins' `.hmap` files plus `SHA256SUMS`/`MANIFEST.txt`. The reason is
 that plugin binaries are **protocol-bound** to the kernel (`ProtocolVersion` + the shared-memory
 magic), so shipping the toolchain without matching artifacts invites installing an old artifact —
@@ -567,10 +572,10 @@ ha_transport_t my_transport = {
 
 ### Usage
 
-Initialize a project via the `plugindev` toolchain:
+Initialize a project via the `hmapdev` toolchain:
 
 ```bash
-plugindev init my-adapter --type remotedevice
+hmapdev init my-adapter --type remotedevice
 ```
 
 Generates `main.c` + `CMakeLists.txt`, can be built directly or used as a third-party library:
@@ -780,17 +785,17 @@ curl -X POST http://<homeagent-server>:8080/api/v1/device/esp32-cam-1/cmd \
 ### Location
 
 - **SDK Source**: `remotedevice/`
-- **plugindev template**: `plugindev init --type remotedevice`
+- **hmapdev template**: `hmapdev init --type remotedevice`
 
 ## Building & Installing
 
 ### Build
 
 ```bash
-plugindev build
+hmapdev build
 ```
 
-Outputs a `.hmap` package to the `dist/` directory (default is the multi-platform bundle; use `plugindev build --no-bundle` for a single-target build).
+Outputs a `.hmap` package to the `dist/` directory (default is the multi-platform bundle; use `hmapdev build --no-bundle` for a single-target build).
 
 ### Install
 

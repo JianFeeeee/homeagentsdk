@@ -14,7 +14,12 @@ import (
 	"time"
 )
 
-const sdkDirName = "plugindev/sdk"
+const sdkDirName = "hmapdev/sdk"
+
+// legacySDKDirName 是改名前的存储目录。工具链在 1.2.0 从 plugindev 改名 hmapdev；
+// 已装过旧版的机器上 SDK 仍在旧路径，直接换名会让它找不到已装 SDK
+// （表现为「没有活动版本」）。新目录不存在而旧目录存在时沿用旧目录。
+const legacySDKDirName = "plugindev/sdk"
 
 // sdkStore returns the root directory for stored SDK versions.
 func sdkStore() string {
@@ -26,7 +31,15 @@ func sdkStore() string {
 		fmt.Printf("error: cannot determine home directory: %v\n", err)
 		os.Exit(1)
 	}
-	return filepath.Join(home, ".homeagent", sdkDirName)
+	dir := filepath.Join(home, ".homeagent", sdkDirName)
+	if _, err := os.Stat(dir); err != nil {
+		if legacy := filepath.Join(home, ".homeagent", legacySDKDirName); legacy != "" {
+			if _, err := os.Stat(legacy); err == nil {
+				return legacy
+			}
+		}
+	}
+	return dir
 }
 
 func sdkCurrentDir() string {
@@ -50,13 +63,13 @@ func cmdSDK(args []string) {
 		cmdSDKList()
 	case "install":
 		if len(args) < 2 {
-			fmt.Println("Usage: plugindev sdk install <version>")
+			fmt.Println("Usage: hmapdev sdk install <version>")
 			os.Exit(1)
 		}
 		cmdSDKInstall(args[1])
 	case "use":
 		if len(args) < 2 {
-			fmt.Println("Usage: plugindev sdk use <version>")
+			fmt.Println("Usage: hmapdev sdk use <version>")
 			os.Exit(1)
 		}
 		cmdSDKUse(args[1])
@@ -72,7 +85,7 @@ func cmdSDK(args []string) {
 }
 
 func sdkHelp() {
-	fmt.Print(`Usage: plugindev sdk <command>
+	fmt.Print(`Usage: hmapdev sdk <command>
 
 Manage installed HomeAgent SDK versions.
 
@@ -85,9 +98,9 @@ Commands:
   latest                Show the latest available version from remote
 
 Examples:
-  plugindev sdk install v0.7.1
-  plugindev sdk install latest
-  plugindev sdk use v0.7.1
+  hmapdev sdk install v0.7.1
+  hmapdev sdk install latest
+  hmapdev sdk use v0.7.1
 `)
 }
 
@@ -127,7 +140,7 @@ func cmdSDKList() {
 		fmt.Printf("  %s %s\n", mark, v)
 	}
 	if current == "" {
-		fmt.Println("\nNo version active. Use 'plugindev sdk use <version>' to set one.")
+		fmt.Println("\nNo version active. Use 'hmapdev sdk use <version>' to set one.")
 	}
 }
 
@@ -292,7 +305,7 @@ func cmdSDKUse(version string) {
 	verDir := sdkVersionDir(version)
 	if _, err := os.Stat(verDir); os.IsNotExist(err) {
 		fmt.Printf("SDK version %s is not installed.\n", version)
-		fmt.Printf("Install it first: plugindev sdk install %s\n", version)
+		fmt.Printf("Install it first: hmapdev sdk install %s\n", version)
 		os.Exit(1)
 	}
 	setCurrentVersion(store, version)
@@ -305,7 +318,7 @@ func cmdSDKPath() {
 	current := resolveCurrentVersion(store)
 	if current == "" {
 		fmt.Println("No active SDK version set.")
-		fmt.Println("Use 'plugindev sdk use <version>' to set one.")
+		fmt.Println("Use 'hmapdev sdk use <version>' to set one.")
 		os.Exit(1)
 	}
 	fmt.Println(sdkVersionDir(current))
@@ -440,21 +453,21 @@ func parseSemver(tag string) [3]int {
 }
 
 // activeSDKRoot returns the path to the active SDK root.
-// It replaces the old runtime.Caller(0) approach so plugindev can work
+// It replaces the old runtime.Caller(0) approach so hmapdev can work
 // independently of its own build location.
 func activeSDKRoot() string {
 	store := sdkStore()
 	current := resolveCurrentVersion(store)
 	if current == "" {
 		fmt.Printf("error: no active SDK version set\n")
-		fmt.Printf("  Install one: plugindev sdk install latest\n")
-		fmt.Printf("  Or set one:  plugindev sdk use <version>\n")
+		fmt.Printf("  Install one: hmapdev sdk install latest\n")
+		fmt.Printf("  Or set one:  hmapdev sdk use <version>\n")
 		os.Exit(1)
 	}
 	root := sdkVersionDir(current)
 	if _, err := os.Stat(root); os.IsNotExist(err) {
 		fmt.Printf("error: active SDK version %s not found at %s\n", current, root)
-		fmt.Printf("  Reinstall: plugindev sdk install %s\n", current)
+		fmt.Printf("  Reinstall: hmapdev sdk install %s\n", current)
 		os.Exit(1)
 	}
 	return root

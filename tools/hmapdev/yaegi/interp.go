@@ -13,7 +13,7 @@ import (
 
 	"github.com/traefik/yaegi/interp"
 	"github.com/traefik/yaegi/stdlib"
-	"github.com/JianFeeeee/homeagent-sdk/tools/plugindev/yaegi/mocksdk"
+	"gitcode.com/JianFeeeee/homeagent-sdk/tools/hmapdev/yaegi/mocksdk"
 )
 
 type YaegiDebugger struct {

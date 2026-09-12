@@ -63,7 +63,7 @@ type TemplateData struct {
 	// SDKLocalPath 是本机 SDK 源码绝对路径，写入生成的 go.mod 作为 replace 目标。
 	//
 	// 为何必须写：gitcode 的模块不在 proxy.golang.org 上，只 require 一个
-	// 版本号的 go.mod 配上缺失的 go.sum，新用户第一次 `plugindev build`
+	// 版本号的 go.mod 配上缺失的 go.sum，新用户第一次 `hmapdev build`
 	// 必定死在 "missing go.sum entry"，而 `go mod tidy` 又会去公共 proxy 拉
 	// 一个不存在的条目。有了本地 replace，go 完全不需要 go.sum 条目。
 	SDKLocalPath string
@@ -71,7 +71,7 @@ type TemplateData struct {
 
 func cmdInit(args []string) {
 	if len(args) < 1 {
-		fmt.Println("Usage: plugindev init <name> [--lua] [--type remotedevice]")
+		fmt.Println("Usage: hmapdev init <name> [--lua] [--type remotedevice]")
 		os.Exit(1)
 	}
 
@@ -192,7 +192,7 @@ func cmdInit(args []string) {
 	if isLua {
 		fmt.Printf("  cd %s && lua main.lua  (standalone test)\n", dir)
 	}
-	fmt.Printf("  cd %s && plugindev build\n", dir)
+	fmt.Printf("  cd %s && hmapdev build\n", dir)
 }
 
 // detectSDKInfo reads the HomeAgent SDK's go.mod and meta to get module path, go version, and SDK version.

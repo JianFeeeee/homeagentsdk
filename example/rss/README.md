@@ -5,7 +5,7 @@ rss plugin
 ## Build
 
 ```bash
-plugindev build
+hmapdev build
 ```
 
 ## Install

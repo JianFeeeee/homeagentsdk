@@ -511,7 +511,7 @@ const tmplReadme = `# {{.Plg.Name}}
 ## Build
 
 ` + "```bash" + `
-plugindev build
+hmapdev build
 ` + "```" + `
 
 ## Install

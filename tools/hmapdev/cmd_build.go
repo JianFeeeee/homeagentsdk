@@ -441,8 +441,8 @@ func ensureSDKResolvable(plg *PlgConfig, sdkModule, sdkPath string) {
 			fmt.Printf("  %s\n", strings.TrimSpace(string(out)))
 		}
 		fmt.Printf("  提示：%s 不在公共 proxy 上。用以下任一方式指向本机 SDK：\n", sdkModule)
-		fmt.Printf("    plugindev sdk install latest      # 装一份到 ~/.homeagent/plugindev/sdk\n")
-		fmt.Printf("    plugindev build --sdk-path <路径>  # 或直接指定源码目录\n")
+		fmt.Printf("    hmapdev sdk install latest      # 装一份到 ~/.homeagent/hmapdev/sdk\n")
+		fmt.Printf("    hmapdev build --sdk-path <路径>  # 或直接指定源码目录\n")
 	}
 }
 
@@ -457,17 +457,12 @@ func findLocalSDK(sdkPath string) string {
 			candidates = append(candidates, abs)
 		}
 	}
-	// plugindev 自身所在位置往上三级（tools/plugindev/plugindev → SDK 根）
+	// hmapdev 自身所在位置往上三级（tools/hmapdev/hmapdev → SDK 根）
 	if self, err := os.Executable(); err == nil {
 		candidates = append(candidates, filepath.Dir(filepath.Dir(filepath.Dir(self))))
 	}
-	// plugindev sdk use 选定的版本
-	store := os.Getenv("HOMEAGENT_SDK_DIR")
-	if store == "" {
-		if home, err := os.UserHomeDir(); err == nil {
-			store = filepath.Join(home, ".homeagent", "plugindev", "sdk")
-		}
-	}
+	// hmapdev sdk use 选定的版本（复用 sdkStore()，含改名前的旧目录回退）
+	store := sdkStore()
 	if store != "" {
 		if d, err := os.ReadFile(filepath.Join(store, "current")); err == nil {
 			if ver := strings.TrimSpace(string(d)); ver != "" {
@@ -511,7 +506,7 @@ func resolveSDKPath(sdkPath string) string {
 		fmt.Printf("error: --sdk-path %q not a valid SDK\n", sdkPath)
 		os.Exit(1)
 	}
-	// Detect from plugindev's own location (internal dev)
+	// Detect from hmapdev's own location (internal dev)
 	self, err := os.Executable()
 	if err == nil {
 		cand := filepath.Dir(filepath.Dir(filepath.Dir(self)))
@@ -519,14 +514,8 @@ func resolveSDKPath(sdkPath string) string {
 			return cand
 		}
 	}
-	// Active SDK via plugindev sdk use
-	store := os.Getenv("HOMEAGENT_SDK_DIR")
-	if store == "" {
-		home, _ := os.UserHomeDir()
-		if home != "" {
-			store = filepath.Join(home, ".homeagent", "plugindev", "sdk")
-		}
-	}
+	// Active SDK via hmapdev sdk use
+	store := sdkStore()
 	if store != "" {
 		if d, err := os.ReadFile(filepath.Join(store, "current")); err == nil {
 			ver := strings.TrimSpace(string(d))
@@ -538,7 +527,7 @@ func resolveSDKPath(sdkPath string) string {
 			}
 		}
 	}
-	fmt.Printf("error: cannot locate SDK. Use --sdk-path or 'plugindev sdk use'\n")
+	fmt.Printf("error: cannot locate SDK. Use --sdk-path or 'hmapdev sdk use'\n")
 	os.Exit(1)
 	return ""
 }

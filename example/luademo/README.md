@@ -17,7 +17,7 @@ lua main.lua   # 使用 sdk.lua mock，不依赖内核
 ## 构建
 
 ```bash
-plugindev build
+hmapdev build
 ```
 
 ## 安装

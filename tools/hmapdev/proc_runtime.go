@@ -56,7 +56,7 @@ const procGenFile = "z_proc_gen.go"
 // generateProcRuntime 把子进程运行时（平台无关主体 + 两个平台挂载实现）
 // 写入插件目录，返回清理函数。
 func generateProcRuntime() (func(), error) {
-	// 清理历史 C ABI 产物：旧版 plugindev 生成过这两个文件，残留下来会与
+	// 清理历史 C ABI 产物：旧版 hmapdev（原名 plugindev）生成过这两个文件，残留下来会与
 	// 本模板的 main 冲突。无需人工清理就能从旧版升级。
 	for _, stale := range []string{"z_bridge_gen.go", "z_entry.c"} {
 		os.Remove(stale)

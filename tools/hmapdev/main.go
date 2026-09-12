@@ -30,14 +30,14 @@ func help() {
 	fmt.Print(`HomeAgent Plugin Dev Tool
 
 Usage:
-  plugindev init <name>             Scaffold a new plugin project
-  plugindev init <name> --lua       Create Lua plugin
-  plugindev init <name> --type remotedevice
+  hmapdev init <name>             Scaffold a new plugin project
+  hmapdev init <name> --lua       Create Lua plugin
+  hmapdev init <name> --type remotedevice
                                     Create C remote device adapter
-  plugindev build [flags]           Compile and package plugin
-  plugindev clean                   Clean build/dist artifacts
-  plugindev debug [dir]             Interpret and debug plugin source
-  plugindev sdk <command>           Manage SDK versions
+  hmapdev build [flags]           Compile and package plugin
+  hmapdev clean                   Clean build/dist artifacts
+  hmapdev debug [dir]             Interpret and debug plugin source
+  hmapdev sdk <command>           Manage SDK versions
 
 Flags:
   --outdir    Output directory (default: dist)

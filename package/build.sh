@@ -28,7 +28,7 @@ case "$TARGET" in
     ;;
   *)
     echo "Unknown target: $TARGET"
-    echo "Usage: $0 [native|linux/amd64|linux/arm64|darwin/amd64|darwin/arm64|windows/amd64|all] [all|plugindev|examples]"
+    echo "Usage: $0 [native|linux/amd64|linux/arm64|darwin/amd64|darwin/arm64|windows/amd64|all] [all|hmapdev|examples]"
     exit 1
 esac
 
@@ -42,12 +42,12 @@ export CGO_ENABLED=0
 
 mkdir -p "$BUILD_DIR"
 
-build_plugindev() {
-  local src="tools/plugindev"
-  local out="$BUILD_DIR/plugindev${SUFFIX:+_$SUFFIX}"
+build_hmapdev() {
+  local src="tools/hmapdev"
+  local out="$BUILD_DIR/hmapdev${SUFFIX:+_$SUFFIX}"
   if [ "$GOOS" = "windows" ]; then out="${out}.exe"; fi
 
-  echo "[BUILD] plugindev ${GOOS:-linux}/${GOARCH:-amd64} → $out"
+  echo "[BUILD] hmapdev ${GOOS:-linux}/${GOARCH:-amd64} → $out"
   cd "$PROJECT_ROOT/$src"
   "$GO" build -trimpath -ldflags "-X gitcode.com/JianFeeeee/homeagent-sdk/meta.Version=${VERSION}" \
     -o "$out" .
@@ -64,7 +64,7 @@ build_plugindev() {
 #
 # 用刚构建出来的那把工具链（而非 PATH 里的），保证产物与本次发版同源。
 build_examples() {
-  local dev="$BUILD_DIR/plugindev${SUFFIX:+_$SUFFIX}"
+  local dev="$BUILD_DIR/hmapdev${SUFFIX:+_$SUFFIX}"
   [ "$GOOS" = "windows" ] && dev="${dev}.exe"
   echo "[BUILD] example plugins ${GOOS:-linux}/${GOARCH:-amd64} → $BUILD_DIR/examples"
   PLUGINDEV="$dev" VERSION="$VERSION" bash "$PROJECT_ROOT/package/build-examples.sh" "$TARGET" "$BUILD_DIR/examples"
@@ -74,10 +74,10 @@ build_examples() {
 case "$COMPONENT" in
   all)
     # 工具链必须先建完：示例用它来构建（同源保证协议一致）。
-    build_plugindev
+    build_hmapdev
     build_examples
     ;;
-  plugindev) build_plugindev ;;
+  hmapdev) build_hmapdev ;;
   examples)  build_examples ;;
   *)
     echo "Unknown component: $COMPONENT"

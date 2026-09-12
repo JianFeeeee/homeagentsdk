@@ -20,7 +20,7 @@
 #   <OUT_DIR>/MANIFEST.txt                  版本、协议版本、产自哪个 commit
 #
 # 纪律（与本项目其它构建脚本一致）：
-#   1. 判成功看**产物是否存在**，不看退出码——plugindev 对部分错误只打印不退出。
+#   1. 判成功看**产物是否存在**，不看退出码——hmapdev 对部分错误只打印不退出。
 #   2. SHA256SUMS 必须在全部产物生成完毕后一次算完，边打边算会漏掉后生成的包。
 set -uo pipefail
 
@@ -67,14 +67,15 @@ fi
 
 # 1) 先保证工具链可用：示例必须用**本仓当前源码**构建，否则产物协议与这一版 SDK 不符。
 #    允许外部指定（发版脚本会在跨平台构建后把刚产出的工具链路径传进来）。
-PLUGINDEV="${PLUGINDEV:-$SDK_ROOT/build/plugindev}"
+# 工具链二进制名由 plugindev 改为 hmapdev；旧变量名 PLUGINDEV 仍兼容。
+HMAPDEV="${HMAPDEV:-${PLUGINDEV:-$SDK_ROOT/build/hmapdev}}"
 if [ ! -x "$PLUGINDEV" ]; then
-  echo "[examples] 先构建 plugindev ..."
-  ( cd "$SDK_ROOT/tools/plugindev" && "$GO" build -o "$PLUGINDEV" . ) || {
-    echo "[examples] plugindev 构建失败，无法继续" >&2; exit 1; }
+  echo "[examples] 先构建 hmapdev ..."
+  ( cd "$SDK_ROOT/tools/hmapdev" && "$GO" build -o "$HMAPDEV" . ) || {
+    echo "[examples] hmapdev 构建失败，无法继续" >&2; exit 1; }
 fi
 if [ ! -x "$PLUGINDEV" ]; then
-  echo "[examples] plugindev 不存在或不可执行：$PLUGINDEV" >&2
+  echo "[examples] hmapdev 不存在或不可执行：$HMAPDEV" >&2
   exit 1
 fi
 
@@ -100,7 +101,7 @@ for dir in "$SDK_ROOT"/example/*/; do
   rc=$?
 
   # 判据是**退出码 + 产物存在**，两者都要。
-  #   只看退出码：plugindev 曾经出错也退 0（已修，但脚本不该依赖它「现在」是对的）。
+  #   只看退出码：hmapdev 曾经出错也退 0（已修，但脚本不该依赖它「现在」是对的）。
   #   只看产物：部分平台失败时会留下上一次的产物，看起来像成功。
   hmap="$(ls "$dir"/dist/*.hmap 2>/dev/null | head -1)"
   if [ $rc -eq 0 ] && [ -n "$hmap" ]; then

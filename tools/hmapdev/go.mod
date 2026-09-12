@@ -1,4 +1,4 @@
-module github.com/JianFeeeee/homeagent-sdk/tools/plugindev
+module gitcode.com/JianFeeeee/homeagent-sdk/tools/hmapdev
 
 go 1.21.0
 

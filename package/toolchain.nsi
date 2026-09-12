@@ -48,7 +48,7 @@ Function pageConfirm
   ${EndIf}
   ${NSD_CreateLabel} 0 5u 100% 12u "将安装以下组件:"
   Pop $0
-  ${NSD_CreateLabel} 15u 20u 100% 12u "• plugindev.exe  — 插件开发工具"
+  ${NSD_CreateLabel} 15u 20u 100% 12u "• hmapdev.exe  — 插件开发工具"
   Pop $0
   ${NSD_CreateLabel} 15u 35u 100% 12u "• SDK ${SDK_VERSION} — 将从远程仓库自动下载"
   Pop $0
@@ -64,11 +64,11 @@ Section "Install" SEC_INSTALL
   SetOutPath "$INSTDIR"
   
   DetailPrint "复制工具链文件..."
-  File "plugindev.exe"
+  File "hmapdev.exe"
 
   DetailPrint "创建快捷方式..."
   CreateDirectory "$SMPROGRAMS\${PRODUCT_NAME}"
-  CreateShortCut "$SMPROGRAMS\${PRODUCT_NAME}\plugindev.lnk" "$INSTDIR\plugindev.exe" "" "$INSTDIR\plugindev.exe" 0
+  CreateShortCut "$SMPROGRAMS\${PRODUCT_NAME}\hmapdev.lnk" "$INSTDIR\hmapdev.exe" "" "$INSTDIR\hmapdev.exe" 0
 
   DetailPrint "配置环境变量..."
   ; Add to system PATH
@@ -93,23 +93,23 @@ Section "Install" SEC_INSTALL
     DetailPrint "Git 已安装: $1"
   ${Else}
     DetailPrint "未检测到 Git，将跳过 SDK 自动下载"
-    DetailPrint "安装完成后请手动运行: plugindev sdk install ${SDK_VERSION}"
+    DetailPrint "安装完成后请手动运行: hmapdev sdk install ${SDK_VERSION}"
   ${EndIf}
 
   ${If} $hasGit == "1"
     DetailPrint "正在下载 SDK ${SDK_VERSION}..."
-    nsExec::ExecToStack '"$INSTDIR\plugindev.exe" sdk install ${SDK_VERSION}'
+    nsExec::ExecToStack '"$INSTDIR\hmapdev.exe" sdk install ${SDK_VERSION}'
     Pop $0
     Pop $1
     ${If} $0 == 0
       StrCpy $sdkInstallOk "1"
       DetailPrint "SDK ${SDK_VERSION} 下载完成"
       DetailPrint "正在激活 SDK ${SDK_VERSION}..."
-      nsExec::Exec '"$INSTDIR\plugindev.exe" sdk use ${SDK_VERSION}'
+      nsExec::Exec '"$INSTDIR\hmapdev.exe" sdk use ${SDK_VERSION}'
       Pop $0
     ${Else}
       DetailPrint "SDK 下载失败 (错误码: $0)"
-      DetailPrint "请手动运行: plugindev sdk install ${SDK_VERSION}"
+      DetailPrint "请手动运行: hmapdev sdk install ${SDK_VERSION}"
     ${EndIf}
   ${EndIf}
 
@@ -126,10 +126,10 @@ SectionEnd
 
 Section "Uninstall"
   Delete "$INSTDIR\Uninstall.exe"
-  Delete "$INSTDIR\plugindev.exe"
+  Delete "$INSTDIR\hmapdev.exe"
   RMDir /r "$INSTDIR\sdk"
   RMDir "$INSTDIR"
-  Delete "$SMPROGRAMS\${PRODUCT_NAME}\plugindev.lnk"
+  Delete "$SMPROGRAMS\${PRODUCT_NAME}\hmapdev.lnk"
   RMDir "$SMPROGRAMS\${PRODUCT_NAME}"
   DeleteRegValue HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "HOMEAGENT_SDK_DIR"
   DeleteRegKey HKLM "Software\Microsoft\CurrentVersion\Uninstall\${PRODUCT_NAME}"

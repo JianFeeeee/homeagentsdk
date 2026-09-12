@@ -5,7 +5,7 @@ ai_image plugin
 ## Build
 
 ```bash
-plugindev build
+hmapdev build
 ```
 
 ## Install
