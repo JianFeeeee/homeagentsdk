@@ -401,3 +401,123 @@ func TestCompactToggle(t *testing.T) {
 		t.Errorf("关闭精简后应保留 description")
 	}
 }
+
+// ── 回归：JSON body 里的 ID 必须是数字（线上实测的 422 缺口）────────────
+//
+// vikunja v2.6.0 实测（2026-09-12）：
+//   {"project_id":"1"}   → 422 expected integer at body.project_id
+//   {"user_id":"1"}      → 422 expected integer at body.user_id
+//   {"username":"jianf"} → 422 unexpected property at body.username
+// 旧实现把 argID() 的字符串直接塞进 body，assignee 还额外带 username，
+// 于是「建任务」「指派」在 v2 下必定失败 —— 只有真调用才暴露，单测没盖到。
+
+func TestTaskCreateSendsNumericProjectID(t *testing.T) {
+	var body map[string]interface{}
+	var raw []byte
+	p, _ := newTestPlugin(t, func(w http.ResponseWriter, r *http.Request) {
+		raw, _ = io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &body)
+		_, _ = w.Write([]byte(`{"id":42,"title":"买菜"}`))
+	})
+	// project_id 传 float64 —— 这正是 SDK 从 JSON 解出来的真实类型
+	if _, err := p.handleTaskCreate(map[string]interface{}{"project_id": float64(3), "title": "买菜"}); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if _, ok := body["project_id"].(float64); !ok {
+		t.Errorf("project_id 必须是 JSON 数字，实际 %T=%v", body["project_id"], body["project_id"])
+	}
+	if strings.Contains(string(raw), `"project_id":"`) {
+		t.Errorf("出现字符串型 project_id（v2 会 422 expected integer）: %s", raw)
+	}
+}
+
+func TestAssigneeAddResolvesUsernameToNumericUserID(t *testing.T) {
+	var body map[string]interface{}
+	var raw []byte
+	var calls []string
+	p, _ := newTestPlugin(t, func(w http.ResponseWriter, r *http.Request) {
+		calls = append(calls, r.Method+" "+r.URL.Path)
+		switch r.URL.Path {
+		case "/api/v2/users":
+			if r.URL.Query().Get("q") != "alice" {
+				t.Errorf("v2 用户搜索应用 q=，实际 query=%q", r.URL.RawQuery)
+			}
+			_, _ = w.Write([]byte(`[{"id":7,"username":"alice"},{"id":9,"username":"alice2"}]`))
+		case "/api/v2/tasks/1/assignees":
+			raw, _ = io.ReadAll(r.Body)
+			_ = json.Unmarshal(raw, &body)
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"user_id":7}`))
+		default:
+			t.Errorf("意外请求: %s %s", r.Method, r.URL.Path)
+		}
+	})
+	if _, err := p.handleTaskAssignees(map[string]interface{}{"id": "1", "action": "add", "user": "alice"}); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if len(calls) != 2 {
+		t.Fatalf("应先查用户再指派，实际调用: %v", calls)
+	}
+	if n, ok := body["user_id"].(float64); !ok || int(n) != 7 {
+		t.Errorf("user_id 必须是数字 7，实际 %T=%v", body["user_id"], body["user_id"])
+	}
+	if _, ok := body["username"]; ok {
+		t.Errorf("v2 不接受 username 字段（422 unexpected property）: %s", raw)
+	}
+}
+
+func TestAssigneeAddNumericUserSkipsLookup(t *testing.T) {
+	var calls []string
+	var body map[string]interface{}
+	p, _ := newTestPlugin(t, func(w http.ResponseWriter, r *http.Request) {
+		calls = append(calls, r.Method+" "+r.URL.Path)
+		if r.URL.Path == "/api/v2/users" {
+			t.Errorf("传数字 ID 时不该再查用户表")
+		}
+		raw, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &body)
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"user_id":7}`))
+	})
+	if _, err := p.handleTaskAssignees(map[string]interface{}{"id": "1", "action": "add", "user": "7"}); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if len(calls) != 1 {
+		t.Errorf("应只有一次请求，实际: %v", calls)
+	}
+	if n, ok := body["user_id"].(float64); !ok || int(n) != 7 {
+		t.Errorf("user_id 应为数字 7，实际 %T=%v", body["user_id"], body["user_id"])
+	}
+}
+
+func TestAssigneeRemoveUsesResolvedNumericPath(t *testing.T) {
+	var gotPath string
+	p, _ := newTestPlugin(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v2/users":
+			_, _ = w.Write([]byte(`[{"id":7,"username":"alice"}]`))
+		default:
+			gotPath = r.Method + " " + r.URL.Path
+			w.WriteHeader(http.StatusNoContent)
+		}
+	})
+	if _, err := p.handleTaskAssignees(map[string]interface{}{"id": "1", "action": "remove", "user": "alice"}); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if gotPath != "DELETE /api/v2/tasks/1/assignees/7" {
+		t.Errorf("移除应用解析出的数字 ID，实际 %q", gotPath)
+	}
+}
+
+func TestAssigneeAddUnknownUserGivesReadableError(t *testing.T) {
+	p, _ := newTestPlugin(t, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`[{"id":7,"username":"bob"}]`))
+	})
+	_, err := p.handleTaskAssignees(map[string]interface{}{"id": "1", "action": "add", "user": "alice"})
+	if err == nil {
+		t.Fatal("找不到用户时必须报错，而不是发出一个注定 422 的请求")
+	}
+	if !strings.Contains(err.Error(), "找不到用户") || !strings.Contains(err.Error(), "bob") {
+		t.Errorf("错误信息应说明找不到并给出相近候选: %v", err)
+	}
+}

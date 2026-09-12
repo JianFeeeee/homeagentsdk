@@ -1152,7 +1152,9 @@ func taskBody(args map[string]interface{}, includeTitle bool) map[string]interfa
 		}
 	}
 	if v := argID(args, "project_id"); v != "" {
-		body["project_id"] = v
+		// 必须是 JSON 数字：发字符串 "1" 会被 Vikunja 判 422 expected integer
+		// （v2 body.project_id 校验 integer；线上实测）
+		body["project_id"] = parseID(v)
 	}
 	return body
 }
@@ -1214,7 +1216,12 @@ func (p *Plugin) handleTaskCreate(args map[string]interface{}) (interface{}, err
 		}
 		if asg := argStr(args, "assignees"); asg != "" {
 			for _, u := range splitCSV(asg) {
-				if _, err := p.call(p.addAssigneeMethod(), "/tasks/"+taskID+"/assignees", map[string]interface{}{"user_id": u, "username": u}); err != nil {
+				body, berr := p.assigneeBody(u)
+				if berr != nil {
+					notes = append(notes, "指派 "+u+" 失败: "+berr.Error())
+					continue
+				}
+				if _, err := p.call(p.addAssigneeMethod(), "/tasks/"+taskID+"/assignees", body); err != nil {
 					notes = append(notes, "指派 "+u+" 失败: "+err.Error())
 				}
 			}
@@ -1403,17 +1410,21 @@ func (p *Plugin) handleTaskAssignees(args map[string]interface{}) (interface{}, 
 		if user == "" {
 			return nil, errors.New("add 需要参数 user（用户名或用户 ID）")
 		}
-		body := map[string]interface{}{"username": user}
-		if n, err := strconv.Atoi(user); err == nil {
-			body["user_id"] = n
+		body, err := p.assigneeBody(user)
+		if err != nil {
+			return nil, err
 		}
 		return p.call(p.addAssigneeMethod(), "/tasks/"+id+"/assignees", body)
 	case "remove":
 		user := argStr(args, "user")
 		if user == "" {
-			return nil, errors.New("remove 需要参数 user（用户 ID）")
+			return nil, errors.New("remove 需要参数 user（用户名或用户 ID）")
 		}
-		return p.call(http.MethodDelete, "/tasks/"+id+"/assignees/"+user, nil)
+		uid, err := p.resolveUserID(user)
+		if err != nil {
+			return nil, err
+		}
+		return p.call(http.MethodDelete, "/tasks/"+id+"/assignees/"+strconv.Itoa(uid), nil)
 	}
 	return nil, fmt.Errorf("未知 action: %s（可用 list|add|remove）", action)
 }
@@ -1529,6 +1540,78 @@ func parseID(s string) interface{} {
 		return n
 	}
 	return s
+}
+
+// numOf 把 JSON 解出的值取成整数（SDK 放进 map 的数字是 float64）
+func numOf(v interface{}) int {
+	switch n := v.(type) {
+	case float64:
+		return int(n)
+	case int:
+		return n
+	case int64:
+		return int(n)
+	case json.Number:
+		if i, err := n.Int64(); err == nil {
+			return int(i)
+		}
+	case string:
+		if i, err := strconv.Atoi(strings.TrimSpace(n)); err == nil {
+			return i
+		}
+	}
+	return 0
+}
+
+// resolveUserID 把「用户名或 ID」解析成**数字** user_id。
+//
+// 为什么必须解析：v2 的 assignees 只接受 {"user_id":N}
+//   - 发 {"username":"x"} → 422 unexpected property
+//   - 发 {"user_id":"1"}  → 422 expected integer
+//
+// 两种都已在线上实测确认（2026-09-12）。
+func (p *Plugin) resolveUserID(user string) (int, error) {
+	u := strings.TrimSpace(user)
+	if u == "" {
+		return 0, errors.New("需要参数 user（用户名或用户 ID）")
+	}
+	if n, err := strconv.Atoi(u); err == nil {
+		return n, nil
+	}
+	res, err := p.call(http.MethodGet, qv("/users", p.searchParam(), u), nil)
+	if err != nil {
+		return 0, fmt.Errorf("按用户名 %q 查用户失败: %w", u, err)
+	}
+	items := asSlice(res)
+	var names []string
+	for _, it := range items {
+		m, ok := it.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		name := fmt.Sprint(m["username"])
+		names = append(names, name)
+		if strings.EqualFold(name, u) {
+			if id := numOf(m["id"]); id > 0 {
+				return id, nil
+			}
+		}
+	}
+	// 只认精确匹配（不区分大小写）。不做「只有一条就用它」的模糊兜底：
+	// 指派会写到别人的任务上，猜错人比让模型改用数字 ID 更贵。
+	if len(names) > 0 {
+		return 0, fmt.Errorf("找不到用户 %q（同名/相近的：%s）；也可直接传数字用户 ID", u, strings.Join(names, ", "))
+	}
+	return 0, fmt.Errorf("找不到用户 %q", u)
+}
+
+// assigneeBody 拼出指派请求体：只含数字 user_id（见 resolveUserID 的说明）
+func (p *Plugin) assigneeBody(user string) (map[string]interface{}, error) {
+	uid, err := p.resolveUserID(user)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]interface{}{"user_id": uid}, nil
 }
 
 func (p *Plugin) handleTaskAttachments(args map[string]interface{}) (interface{}, error) {
