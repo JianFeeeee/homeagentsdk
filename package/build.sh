@@ -5,6 +5,13 @@ PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BUILD_DIR="${PROJECT_ROOT}/build"
 VERSION="${VERSION:-$(git -C "$PROJECT_ROOT" describe --tags --dirty 2>/dev/null || echo "0.7.1")}"
 GO="${GO:-$(command -v go 2>/dev/null || echo "/home/jianf/go1.26.5/go/bin/go")}"
+# 宿主平台必须在**本脚本 export GOOS/GOARCH 之前**取定。
+# 否则 `go env GOOS` 会返回被 export 的目标平台（此前 `build.sh all all`
+# 就是因此拿 darwin 二进制在 linux 上跑，报 cannot execute binary file）。
+NATIVE_GOOS="$(env -u GOOS -u GOARCH "$GO" env GOOS 2>/dev/null || uname -s | tr 'A-Z' 'a-z')"
+NATIVE_GOARCH="$(env -u GOOS -u GOARCH "$GO" env GOARCH 2>/dev/null || uname -m)"
+case "$NATIVE_GOARCH" in x86_64|amd64) NATIVE_GOARCH="amd64" ;; aarch64|arm64) NATIVE_GOARCH="arm64" ;; esac
+case "$NATIVE_GOOS" in darwin|linux|windows) ;; *) NATIVE_GOOS="linux" ;; esac
 GOCACHE="${GOCACHE:-}"
 GOPATH="${GOPATH:-}"
 
@@ -62,11 +69,26 @@ build_hmapdev() {
 # 拿旧产物去装，表现是握手失败（魔数不匹配）——看起来像「插件坏了」而不是
 # 「版本不配套」。
 #
-# 用刚构建出来的那把工具链（而非 PATH 里的），保证产物与本次发版同源。
+# 用**宿主可执行**的那把工具链（而非 PATH 里的），保证产物与本次发版同源。
+#
+# 为什么不能用目标平台的那把：示例的跨平台构建是由 hmapdev 的 `--target GOOS/GOARCH`
+# 完成的，被执行的进程本身必須能在当前机器上跑。拿目标平台的二进制去跑只会得到
+# “cannot execute binary file: Exec format error”（`build.sh all all` 在 darwin 处断过）。
 build_examples() {
-  local dev="$BUILD_DIR/hmapdev${SUFFIX:+_$SUFFIX}"
-  [ "$GOOS" = "windows" ] && dev="${dev}.exe"
-  echo "[BUILD] example plugins ${GOOS:-linux}/${GOARCH:-amd64} → $BUILD_DIR/examples"
+  local dev
+  dev="$BUILD_DIR/hmapdev_${NATIVE_GOOS}_${NATIVE_GOARCH}"
+  [ "$NATIVE_GOOS" = "windows" ] && dev="${dev}.exe"
+  # 宿主工具链缺失时先补建（`all` 的第一个目标可能不是宿主平台）。
+  if [ ! -x "$dev" ]; then
+    echo "[BUILD] 先补建宿主工具链 ${NATIVE_GOOS}/${NATIVE_GOARCH}（示例的跨平台由 --target 完成）"
+    ( unset GOOS GOARCH; bash "$0" "${NATIVE_GOOS}/${NATIVE_GOARCH}" hmapdev ) || return 1
+  fi
+  if [ ! -x "$dev" ]; then
+    echo "[BUILD] 无法构建示例：缺少宿主可执行的工具链 $dev" >&2
+    echo "        先跑： $0 ${NATIVE_GOOS}/${NATIVE_GOARCH} hmapdev" >&2
+    return 1
+  fi
+  echo "[BUILD] example plugins ${GOOS:-linux}/${GOARCH:-amd64} → $BUILD_DIR/examples（用 ${NATIVE_GOOS}/${NATIVE_GOARCH} 的工具链交叉构建）"
   PLUGINDEV="$dev" VERSION="$VERSION" bash "$PROJECT_ROOT/package/build-examples.sh" "$TARGET" "$BUILD_DIR/examples"
   echo "  OK"
 }
