@@ -75,6 +75,18 @@ func cmdBuild(args []string) {
 	}
 
 	if plg.IsLua() {
+		// Lua 插件不经过 Go 编译，但也必须做两件与纪律相关的事：
+		//   1) 记录「用哪版 SDK 语义写的」——否则新 API 在旧内核上只会静默缺失；
+		//   2) 打包前做语法预检——否则语法错会被原样包进 .hmap，到内核加载时才暴露。
+		if root := tryActiveSDKRoot(); root != "" {
+			plg.ResolvedSDK = normalizeSDKVersion(readMetaVersion(root))
+		}
+		if err := checkLuaSyntax("main.lua"); err != nil {
+			fmt.Printf("  error: %v\n", err)
+			// 直接退出而非置 buildFailed：Lua 分支不进入后面的收尾统计，
+			// 早期 return 会让调用方拿到 0 退出码。
+			os.Exit(1)
+		}
 		buildTarget(plg, "lua", outDir, "")
 		return
 	}
@@ -253,6 +265,30 @@ func buildBundle(plg *PlgConfig, outDir string, sdkPath string) {
 //
 // 这是 entry 字段唯一仍在使用的用途：Go 插件不再看 entry 值，一律产出 plugin.bin。
 func (p *PlgConfig) IsLua() bool { return p.Entry == luaEntryFile }
+
+// checkLuaSyntax 在打包前对 Lua 源码做语法预检。
+//
+// 为什么不只是“能做就做”：Lua 分支不经过编译器，语法错会被原样包进 .hmap，
+// 直到内核加载时才报错，且错误现场是内核日志而不是构建日志。
+// 有 luac 用 luac -p（只解析不执行）；只有 lua 时用 loadfile 同样只解析；
+// 两者都没有才降级为警告，不阻断构建（构建机可以没有 Lua 解释器）。
+func checkLuaSyntax(path string) error {
+	if bin, err := exec.LookPath("luac"); err == nil {
+		if out, err := exec.Command(bin, "-p", path).CombinedOutput(); err != nil {
+			return fmt.Errorf("lua syntax check failed (%s): %s", path, strings.TrimSpace(string(out)))
+		}
+		return nil
+	}
+	if bin, err := exec.LookPath("lua"); err == nil {
+		script := fmt.Sprintf("local f,e=loadfile(%q); if not f then io.stderr:write(e) os.exit(1) end", path)
+		if out, err := exec.Command(bin, "-e", script).CombinedOutput(); err != nil {
+			return fmt.Errorf("lua syntax check failed (%s): %s", path, strings.TrimSpace(string(out)))
+		}
+		return nil
+	}
+	fmt.Println("  note: lua/luac not found, skipping syntax check")
+	return nil
+}
 
 func readPlgJSON(path string) (*PlgConfig, error) {
 	data, err := os.ReadFile(path)

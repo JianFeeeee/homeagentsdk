@@ -164,7 +164,13 @@ func cmdInit(args []string) {
 	// Detect SDK info for Go plugin go.mod.
 	// 生成的 go.mod 除 require 外还写一条指向本机 SDK 的 replace：
 	// 否则 scaffold 出来的项目第一次 build 必定失败（详见 SDKLocalPath 注释）。
-	if !isLua {
+	if isLua {
+		// Lua 插件也要记录它按哪版 SDK 语义编写：Lua `sdk.*` 是公开契约，
+		// 与内核能力版本挂钩；不写版本就只能靠“调用时才发现是 nil”。
+		if root := tryActiveSDKRoot(); root != "" {
+			data.Plg.SDK = normalizeSDKVersion(readMetaVersion(root))
+		}
+	} else {
 		sdkMod, goVer, sdkRoot, sdkVer := detectSDKInfo()
 		data.ModulePath = name
 		data.GoVersion = goVer
@@ -187,7 +193,14 @@ func cmdInit(args []string) {
 	// Lua plugins get main.lua + sdk.lua; Go plugins get plugin.go only
 	if isLua {
 		writeTemplate(filepath.Join(dir, "main.lua"), tmplMainLua, data)
-		writeTemplate(filepath.Join(dir, "sdk.lua"), tmplSDKLua, data)
+		// sdk.lua 是给 `lua main.lua` 离线测试用的 mock，单一事实源在 SDK 仓的
+		// sdk/lua/sdk.lua；优先从当前激活的 SDK 拷，拷不到才回退内嵌模板。
+		if !copyCanonicalLuaSDK(dir) {
+			if err := os.WriteFile(filepath.Join(dir, "sdk.lua"), []byte(fallbackLuaSDK), 0644); err != nil {
+				fmt.Printf("error: write sdk.lua: %v\n", err)
+				os.Exit(1)
+			}
+		}
 	} else {
 		writeTemplate(filepath.Join(dir, "plugin.go"), tmplPluginGo, data)
 	}
@@ -208,6 +221,43 @@ func cmdInit(args []string) {
 		fmt.Printf("  cd %s && lua main.lua  (standalone test)\n", dir)
 	}
 	fmt.Printf("  cd %s && hmapdev build\n", dir)
+}
+
+// activeSDKRoot 返回当前激活 SDK 的根目录，未安装/未激活则报错退出。
+//
+// 与 activeSDKRoot（fatal 版）区别：这里只探测，不退出。
+// Lua 插件的 mock 是“锦上添花”，没装 SDK 不应该阻断 init。
+func tryActiveSDKRoot() string {
+	store := sdkStore()
+	current := resolveCurrentVersion(store)
+	if current == "" {
+		return ""
+	}
+	root := sdkVersionDir(current)
+	if _, err := os.Stat(root); err != nil {
+		return ""
+	}
+	return root
+}
+
+// copyCanonicalLuaSDK 把激活 SDK 的 sdk/lua/sdk.lua 拷进新项目。
+// 三份 sdk.lua（内核内嵌 / 工具链模板 / 项目副本）各自漂移是本工具链的历史债，
+// 单一事实源在 SDK 仓，工具链只负责搬运。返回是否成功。
+func copyCanonicalLuaSDK(dir string) bool {
+	root := tryActiveSDKRoot()
+	if root == "" {
+		return false
+	}
+	src := filepath.Join(root, "sdk", "lua", "sdk.lua")
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return false
+	}
+	if err := os.WriteFile(filepath.Join(dir, "sdk.lua"), data, 0644); err != nil {
+		return false
+	}
+	fmt.Printf("  sdk.lua <- %s\n", src)
+	return true
 }
 
 // detectSDKInfo reads the HomeAgent SDK's go.mod and meta to get module path, go version, and SDK version.

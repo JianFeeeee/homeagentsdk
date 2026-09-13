@@ -67,6 +67,65 @@ function plugin.start(sdk)
     return { content = res }
   end)
 
+  -- 工具：1.1/1.2/1.3 新增能力巡检（媒体块 / 注入标志位 / 事件 / 动态通道注销）
+  -- 注意：故意不在这里调用 sdk.inject_input_sync——工具handler 运行在 LLM 回合内，
+  -- 同步注入会等本轮回复，等于自己等自己（死锁）。同步注入只适合事件回调等外部入口。
+  sdk.register_tool("luademo_probe_v2", {
+    description = "Exercise media blocks, inject opts, events and channel unregister",
+    parameters = { type = "object", properties = {} },
+    no_memory = true,
+    context_policy = "prune",
+  }, function(args)
+    local res = {}
+
+    -- 多模态：设置下一轮 tool message 携带的内容块
+    sdk.set_tool_blocks({
+      { type = "text", text = "luademo media block" },
+      { type = "image_url", image_url = { url = "https://example.com/x.png", detail = "low" } },
+    })
+    res.set_tool_blocks = "ok"
+
+    -- 注入标志位（零值 opts 与旧三参数等价）
+    sdk.inject_text_opts("luademo", "luademo_in", "opts inject", {
+      no_memory = true, context_policy = "prune",
+    })
+    res.inject_text_opts = "ok"
+
+    -- 带媒体的中断注入
+    sdk.inject_interrupt_media("luademo", "luademo_in", "media inject", {
+      { type = "audio_url", audio_url = { url = "https://example.com/a.mp3" } },
+    })
+    res.inject_interrupt_media = "ok"
+
+    -- 媒体入记忆：三元组带原句，文档带附件
+    local _, merr = sdk.memory.commit({{
+      subject = "luademo", relation = "shows", object = "image",
+      sentence_text = "luademo shows an image", media_digests = {},
+    }})
+    res.memory_commit_with_sentence = { err = merr }
+    local _, derr = sdk.doc.insert_with_media(
+      { id = "luademo-media", title = "media", content = "with attachment" },
+      { { mime = "image/png", name = "x.png", data = "aGVsbG8=" } })
+    res.doc_insert_with_media = { err = derr }
+
+    -- 事件订阅（返回取消订阅函数）
+    local unsub = sdk.events.subscribe("agent_output", function(evt)
+      sdk.log("info", "luademo event: " .. tostring(evt.type))
+    end)
+    res.events_subscribe = type(unsub)
+    if unsub then unsub() end
+
+    -- 插件管理（只读查询）
+    res.plugin_mgr_loaded = type(sdk.plugin_mgr.list_loaded())
+
+    -- 动态输出通道注销
+    sdk.register_output_channel("luademo_dyn", 0, "dynamic", {}, function(a) return { ok = true } end)
+    local _, uerr = sdk.unregister_output_channel("luademo_dyn")
+    res.unregister = { err = uerr }
+
+    return { content = res }
+  end)
+
   -- 阶段钩子：own_tools 作用域（仅本插件工具被调用时触发）
   sdk.register_stage("before_toolcall", function(ctx)
     local calls = ctx.tool_calls or {}
