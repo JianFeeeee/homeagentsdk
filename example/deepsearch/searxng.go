@@ -8,6 +8,11 @@ package main
 //   - stdin 关闭（内核消失）同样会跑 handlers + Stop()
 //
 // 因此这里的关闭动作必须**有界**：searxShutdownBudget 取 4s，留 1s 余量。
+//
+// 归属规则（谁拉起谁关）：**只有本插件真正执行了 `docker compose up -d` 的实例才算「我们起的」**。
+// 探活发现已在运行的实例只「接管」——不认领关闭责任。否则同一台机器上的第二个实例
+// （E2E 测试拉起的插件、另一个 daemon）退出时会把生产后端一起带走：实测就是这条把
+// 线上搜索服务反复关停的（测试实例用默认配置，测试结束就 `docker compose stop`）。
 // 若插件是被 kill -9 / OOM 带走的，关闭动作不会执行 —— SearXNG 会留在运行态；
 // 下次 Start 探测到它在跑就直接接管，这是更安全的失败方向。
 
@@ -99,8 +104,8 @@ func (p *Plugin) ensureSearxng() {
 		return
 	}
 	if p.searxReachable(b.probe) {
-		log.Printf("[%s] SearXNG 已在运行（%s），直接接管", p.name, p.searxURL)
-		p.markSearxOwned()
+		// 只接管，不认领：不是我们拉起来的，就不能由我们关掉
+		log.Printf("[%s] SearXNG 已在运行（%s），直接接管（不认领关闭责任）", p.name, p.searxURL)
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), b.up)

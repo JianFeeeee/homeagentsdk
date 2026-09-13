@@ -59,8 +59,10 @@ func TestSearchDedupAndFormat(t *testing.T) {
 	if gotQuery.Get("format") != "json" {
 		t.Errorf("必须要求 json 输出，实际 %q", gotQuery.Get("format"))
 	}
-	if gotQuery.Get("limit") != "5" {
-		t.Errorf("limit 未生效: %q", gotQuery.Get("limit"))
+	// SearXNG 的 /search **不认** count/limit（实测两者都返回同样的条数），
+	// 所以「要几条」必须由插件侧截断 —— 也不要再发这种无意义参数（曾以为它生效过）。
+	if gotQuery.Get("limit") != "" || gotQuery.Get("count") != "" {
+		t.Errorf("不应依赖 SearXNG 的条数参数（它不认）: %q", gotQuery.Encode())
 	}
 	txt := res.(map[string]interface{})["content"].(string)
 	// utm_source 应被规范化掉，重复项只剩一条
@@ -284,5 +286,58 @@ func TestSearchRawMode(t *testing.T) {
 	}
 	if _, err := json.Marshal(m); err != nil {
 		t.Errorf("结构化结果应可序列化: %v", err)
+	}
+}
+
+// 13) 条数截断：SearXNG 不认条数参数，插件必须自己截，并且**如实说明**给了几条
+func TestSearchTruncatesToCountAndSaysSo(t *testing.T) {
+	p, _ := newTestPlugin(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(sampleResponse)) // 4 条，去重后 3 条
+	})
+	res, err := p.handleSearch(map[string]interface{}{"query": "deepin", "count": float64(2)})
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	txt := res.(map[string]interface{})["content"].(string)
+
+	// 必须明确区分「命中几条」与「返回几条」：写成「命中 N 条」而实际给了 M<N 条，
+	// 模型会把 N 当成拿到手的条数（实测被 agent 当成事实报给用户）。
+	if !strings.Contains(txt, "命中 3 条，返回前 2 条") {
+		t.Errorf("应如实说明命中数与返回数:\n%s", txt)
+	}
+	// 按 score 排序后的前两条：zhihu(9.5)、163(7.2)；第三条 bbs.deepin(2.0) 必须被截掉
+	if !strings.Contains(txt, "统信内核开发工程师") || !strings.Contains(txt, "离谱！") {
+		t.Errorf("前两条（按分数）应在:\n%s", txt)
+	}
+	if strings.Contains(txt, "deepin官方论坛") {
+		t.Errorf("第 3 条（score 最低）超出了 count=2，不该出现:\n%s", txt)
+	}
+	// 条目行数也要正好 2 条（防「头部说 2 条、正文还是全量」）
+	if n := strings.Count(txt, "\n   http"); n != 2 {
+		t.Errorf("正文应恰好 2 条，实际 %d 条:\n%s", n, txt)
+	}
+}
+
+// 14) 条数上限：不因为模型要 200 条就真给 200 条
+func TestLimitResultsCapsAndDefaults(t *testing.T) {
+	p := &Plugin{name: "deepsearch", maxItems: 8}
+	many := make([]searxResult, 30)
+	for i := range many {
+		many[i] = searxResult{URL: "https://e.test/", Title: "t"}
+	}
+	if got := len(p.limitResults(map[string]interface{}{}, many)); got != 8 {
+		t.Errorf("未指定 count 时应取配置的 max_items=8，实际 %d", got)
+	}
+	if got := len(p.limitResults(map[string]interface{}{"count": float64(3)}, many)); got != 3 {
+		t.Errorf("count=3 应返回 3 条，实际 %d", got)
+	}
+	if got := len(p.limitResults(map[string]interface{}{"count": float64(200)}, many)); got != maxSearchResults {
+		t.Errorf("超过上限应收敛到 %d 条，实际 %d", maxSearchResults, got)
+	}
+	// 结果比 count 少时不能造数据
+	few := many[:2]
+	if got := len(p.limitResults(map[string]interface{}{"count": float64(5)}, few)); got != 2 {
+		t.Errorf("结果不足时应原样返回，实际 %d", got)
 	}
 }

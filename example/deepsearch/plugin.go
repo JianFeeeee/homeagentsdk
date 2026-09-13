@@ -11,6 +11,7 @@ package main
 // 配置项（全部可在插件配置界面改）：
 //   searxng_url          本地/远端 SearXNG 基地址（默认 http://127.0.0.1:8888）
 //   manage_searxng       是否由本插件托管搜索后端（默认 true）：插件启动时拉起、停止时关闭
+//                        （只关**自己拉起**的实例；发现已在运行则只接管，不认领关闭责任）
 //   searxng_dir          托管时使用的 compose 目录（默认 /root/searxng-agent）
 //   stop_searxng_on_exit 停止插件时是否关闭后端（默认 true；关掉可避免重载时反复重启）
 //   max_results          默认返回条数（控制上下文体积）
@@ -53,7 +54,10 @@ const (
 	cfgUserAgent     = "user_agent"
 
 	defaultSearxURL = "http://127.0.0.1:8888"
-	defaultUA       = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+
+	// maxSearchResults 单次返回给模型的条数上限（保护上下文体积）
+	maxSearchResults = 20
+	defaultUA        = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
 )
 
 type Plugin struct {
@@ -365,10 +369,39 @@ func dedupResults(in []searxResult) []searxResult {
 	return out
 }
 
+// limitResults 把结果截断到请求条数。
+//
+// 为什么必须在插件侧截断：SearXNG 的 /search 没有「返回条数」参数 ——
+// `?count=3`、`?limit=3` 与不带参数返回的条数一模一样（实测 2026-09-13，35 条）。
+// 少了这一步，`count` 与插件配置 `max_results` 全部形同虚设：模型每次吞下 35~58 条
+// 带摘要结果（还误以为「要 3 条给了 47 条」，我实测被 agent 当成事实报给用户过）。
+func (p *Plugin) limitResults(args map[string]interface{}, in []searxResult) []searxResult {
+	n := p.maxItems
+	if n <= 0 {
+		n = 8
+	}
+	if v := argInt(args, "count", 0); v > 0 {
+		n = v
+	}
+	if n > maxSearchResults {
+		n = maxSearchResults // 保护上下文：不因为模型要 200 条就真给 200 条
+	}
+	if len(in) > n {
+		return in[:n]
+	}
+	return in
+}
+
 // formatResults 返回给模型的紧凑文本（每条：序号/标题/URL/摘要/时间）
-func formatResults(q string, res []searxResult, unresponsive [][]string, elapsed time.Duration) string {
+// total 是去重后的命中总数，res 是实际返回给模型的那几条（可能已被截断）。
+// 两者必须分开说：写成「命中 N 条」而实际只给几条，模型会把它当成"拿到了 N 条"。
+func formatResults(q string, res []searxResult, total int, unresponsive [][]string, elapsed time.Duration) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "检索 %q：命中 %d 条（%s）\n", q, len(res), elapsed.Round(time.Millisecond))
+	if total > len(res) {
+		fmt.Fprintf(&b, "检索 %q：命中 %d 条，返回前 %d 条（%s）\n", q, total, len(res), elapsed.Round(time.Millisecond))
+	} else {
+		fmt.Fprintf(&b, "检索 %q：命中 %d 条（%s）\n", q, len(res), elapsed.Round(time.Millisecond))
+	}
 	engSet := map[string]bool{}
 	withSnippet := 0
 	for _, r := range res {
@@ -637,7 +670,7 @@ func (p *Plugin) Start(s *sdk.PluginSDK) error {
 	st.RegisterDef(sdk.ConfigDef{
 		Key: cfgManageSearx, Type: "bool", Default: "true",
 		DisplayName: "托管 SearXNG",
-		Description: "开启后：插件启动时自动拉起搜索后端（docker compose up -d），插件停止时关闭它。关掉则假定后端由外部维护（如 systemd）",
+		Description: "开启后：插件启动时自动拉起搜索后端（docker compose up -d），插件停止时关闭**自己拉起的**实例。发现后端已在运行则只接管、不关闭（否则会带走别的实例的服务）。关掉则假定后端由外部维护（如 systemd）",
 		Category:    "deepsearch",
 	})
 	st.RegisterDef(sdk.ConfigDef{
@@ -675,7 +708,7 @@ func (p *Plugin) registerTools() {
 			"需要事实、新闻、文档、报错信息时用它，而不是抓搜索引擎页面",
 		Parameters: schemas(map[string]interface{}{
 			"query":      pStr("检索词；中文/英文都可"),
-			"count":      pInt("条数，默认取插件配置（8）"),
+			"count":      pInt("返回条数（默认取插件配置 max_results；上限 20）"),
 			"engines":    pStr("指定引擎，逗号分隔（如 duckduckgo,brave,quark）；留空用默认聚合"),
 			"category":   pStr("类别：general（默认）| news | it | science | images"),
 			"time_range": pStr("时间范围：day|week|month|year（新闻类很有用）"),
@@ -732,9 +765,8 @@ func (p *Plugin) registerTools() {
 func (p *Plugin) buildParams(args map[string]interface{}, forceCategory string, forceRange string) url.Values {
 	v := url.Values{}
 	v.Set("q", argStr(args, "query"))
-	if n := argInt(args, "count", p.maxItems); n > 0 {
-		v.Set("limit", strconv.Itoa(n)) // SearXNG 用 limit 控制返回条数
-	}
+	// 注意：SearXNG 的 /search **不认** count/limit 参数（实测 ?count=3 / ?limit=3 与不带
+	// 参数返回完全相同的条数），所以「要几条」由插件自己截断，见 limitResults。
 	if e := argStr(args, "engines"); e != "" {
 		v.Set("engines", e)
 	}
@@ -781,7 +813,9 @@ func (p *Plugin) handleSearch(args map[string]interface{}) (interface{}, error) 
 	if len(results) == 0 {
 		return map[string]interface{}{"content": p.emptyHint(query, resp)}, nil
 	}
-	txt := formatResults(query, results, resp.UnresponsiveEngine, time.Since(start))
+	total := len(results)
+	results = p.limitResults(args, results)
+	txt := formatResults(query, results, total, resp.UnresponsiveEngine, time.Since(start))
 	if len(resp.Answers) > 0 {
 		txt = "直接答案：" + strings.Join(resp.Answers, "；") + "\n\n" + txt
 	}
@@ -833,7 +867,9 @@ func (p *Plugin) handleNews(args map[string]interface{}) (interface{}, error) {
 	if len(results) == 0 {
 		return map[string]interface{}{"content": p.emptyHint(query, resp)}, nil
 	}
-	return map[string]interface{}{"content": formatResults(query+"（新闻）", results, resp.UnresponsiveEngine, time.Since(start))}, nil
+	total := len(results)
+	results = p.limitResults(args, results)
+	return map[string]interface{}{"content": formatResults(query+"（新闻）", results, total, resp.UnresponsiveEngine, time.Since(start))}, nil
 }
 
 func (p *Plugin) handleFetch(args map[string]interface{}) (interface{}, error) {
@@ -883,6 +919,8 @@ func (p *Plugin) handleDeep(args map[string]interface{}) (interface{}, error) {
 	if len(results) == 0 {
 		return map[string]interface{}{"content": p.emptyHint(query, resp)}, nil
 	}
+	candidates := len(results)
+	results = p.limitResults(args, results) // count 只影响候选池，精读条数另有 top_k
 
 	type doc struct {
 		idx   int
@@ -917,7 +955,7 @@ func (p *Plugin) handleDeep(args map[string]interface{}) (interface{}, error) {
 	wg.Wait()
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "深检索 %q —— 候选 %d 条，已读 %d 篇（%s）\n\n", query, len(results), len(docs), time.Since(start).Round(time.Millisecond))
+	fmt.Fprintf(&b, "深检索 %q —— 命中候选 %d 条，取前 %d 条精读（%s）\n\n", query, candidates, len(results), time.Since(start).Round(time.Millisecond))
 	b.WriteString("【候选清单】\n")
 	for i, r := range results {
 		fmt.Fprintf(&b, "%d. %s\n   %s\n", i+1, strings.TrimSpace(r.Title), r.URL)

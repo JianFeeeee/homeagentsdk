@@ -65,8 +65,12 @@ func TestEnsureSearxngStartsWhenUnreachable(t *testing.T) {
 	}
 }
 
-// 2) 后端已在跑 → 不重启，直接接管
-func TestEnsureSearxngAdoptsRunningBackend(t *testing.T) {
+// 2) 后端已在跑 → 不重启，**且不认领关闭责任**
+//
+// 这条是关键：同一台机器上会有第二个实例（E2E 测试拉起的插件、另一个 daemon）。
+// 如果「接管」也算「我拥有」，任一实例退出就会把生产后端关掉 —— 线上实测就是
+// 测试实例在 teardown 时 `docker compose stop`，把搜索服务反复关停。
+func TestEnsureSearxngAdoptsRunningBackendWithoutOwning(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/healthz" {
 			_, _ = w.Write([]byte("OK"))
@@ -87,8 +91,30 @@ func TestEnsureSearxngAdoptsRunningBackend(t *testing.T) {
 	if len(calls) != 0 {
 		t.Errorf("已在跑就不该重启它，实际执行了：%v", calls)
 	}
-	if !p.searxOwned {
-		t.Error("接管后也应负责停止（与「不重启」不冲突）")
+	if p.searxOwned {
+		t.Error("不是我们拉起的，就不能认领关闭责任（否则退出时会带走别人的后端）")
+	}
+}
+
+// 2b) 接管的实例退出时，一个 docker 命令都不能发
+func TestAdoptedBackendSurvivesShutdown(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("OK"))
+	}))
+	defer srv.Close()
+
+	var calls []fakeCall
+	p := &Plugin{
+		name: "deepsearch", searxURL: srv.URL, searxDir: "/tmp/fake-searx",
+		manageSearx: true, stopOnExit: true, userAgent: "test",
+		bud: fastBudget(), run: newFakeRunner(&calls, "", nil),
+	}
+	p.ensureSearxng()
+	if err := p.Stop(); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	if len(calls) != 0 {
+		t.Errorf("接管来的后端在退出时必须留着，实际执行了：%v", calls)
 	}
 }
 
