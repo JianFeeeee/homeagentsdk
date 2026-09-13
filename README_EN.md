@@ -4,7 +4,7 @@ Plugin development SDK for building intelligent plugins that interact with the H
 
 ## Version and Compatibility
 
-Current: **SDK 1.2.0** (requires kernel **1.2.0+**).
+Current: **SDK 1.3.0** (requires kernel **1.3.0+**).
 
 **The version tracks the kernel's minor version, with the patch position pinned at `.0`**:
 
@@ -12,12 +12,32 @@ Current: **SDK 1.2.0** (requires kernel **1.2.0+**).
 |---|---|
 | 1.0.0 / 1.0.1 / … / 1.0.4 | 1.0.0 |
 | 1.1.0 / 1.1.1 / … / 1.1.N | **1.1.0** |
-| 1.2.0 onward | 1.2.0 |
+| 1.2.0 / 1.2.1 / … / 1.2.N | **1.2.0** |
+| 1.3.0 onward | **1.3.0** |
 
 The kernel's patch position is reserved for bugfixes and vulnerability fixes, which never touch the
 public interface, so the SDK version has no reason to move with it — otherwise you would either be
 forced to chase releases or suspect your version is stale, when not one character of the interface
 has changed.
+
+The SDK repository therefore publishes **exactly once per minor version** (`vX.Y.0`); kernel patches
+such as `v1.3.1` do not trigger an SDK release. (A `v1.3.1` tag was mistakenly cut on 2026-09-13 and
+has been withdrawn — any SDK tag with a non-zero patch position is wrong.)
+
+## New in 1.3.0: Injection Priority and Dynamic Output Channels
+
+- **`InjectOptions.Priority` / `PriorityL1`–`PriorityL4`** — a plugin declares the interrupt level of
+  its own injection; the kernel schedules L1–L4, where **L4 is reserved for the kernel and
+  kernel-level plugins**. The zero value is fully equivalent to the old three-argument call
+  (queued, never preempting), so existing plugins need neither a code change nor a rebuild.
+  Queued input has no level: anything can jump ahead of it.
+- **`UnregisterOutputChannel` / `OutputChannelUnregistrar` / `SetOutputChannelUnregistrar`** —
+  channels that die with their resource (one channel per remote device) can now be unregistered;
+  previously they lingered and the model kept "successfully" sending into a dead channel.
+- **Channel names must be legal and unique.** The name is spliced into the LLM function name
+  `output_send__<name>`, so it may only contain `[A-Za-z0-9_-]`. A real production incident
+  (2026-09-13): `device/<id>` made every LLM request fail with 403. Derive channel names from
+  external IDs — never use the raw ID.
 
 **Upgrading a 1.0.x plugin to 1.1.x: no code changes, no rebuild.** Everything added in 1.1.0 is
 in the "plugin calls, kernel implements" direction, so not calling it means not being affected
