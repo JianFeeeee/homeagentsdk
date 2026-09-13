@@ -95,6 +95,18 @@ func cmdBuild(args []string) {
 		plg.ResolvedSDK = normalizeSDKVersion(readMetaVersion(sdkPath))
 	}
 
+	// SDK 能力前置校验：proc 桥的模板（z_proc_gen.go）会透传 InjectOptions.Priority，
+	// 而旧版 SDK 没有这个字段。不校验的话，用户看到的是 z_proc_gen.go 里两条
+	// "opts.Priority undefined" 编译错误——错误信息指向生成物，完全看不出是 SDK 版本问题。
+	if sdkPath != "" && !sdkHasInjectPriority(sdkPath) {
+		fmt.Printf("error: 当前 SDK（%s）缺少 sdk.InjectOptions.Priority\n", plg.ResolvedSDK)
+		fmt.Printf("  子进程模式（proc 桥）的模板需要它来透传注入优先级 L1-L4。\n")
+		fmt.Printf("  解决办法（二选一）：\n")
+		fmt.Printf("    1) 升级 SDK：hmapdev sdk install <含该能力的版本> && hmapdev sdk use <版本>\n")
+		fmt.Printf("    2) 用本地 SDK 源码：hmapdev sdk install --from /path/to/homeagent-sdk\n")
+		os.Exit(1)
+	}
+
 	// Ensure go.mod exists with correct SDK path
 	sdkModule := ensureGoMod(plg, sdkPath)
 
@@ -868,4 +880,23 @@ func linkThirdpart(plg *PlgConfig, target string) func() {
 	return func() {
 		os.Remove(importFile)
 	}
+}
+
+// sdkHasInjectPriority 报告该 SDK 源码是否已具备 InjectOptions.Priority
+// （proc 桥透传注入优先级所必需的能力；SDK 开发期与已发布版本可能不一致）。
+func sdkHasInjectPriority(sdkPath string) bool {
+	data, err := os.ReadFile(filepath.Join(sdkPath, "sdk", "plugin.go"))
+	if err != nil {
+		return true // 读不到就不拦（不在校验范围内）
+	}
+	src := string(data)
+	i := strings.Index(src, "type InjectOptions struct")
+	if i < 0 {
+		return true
+	}
+	seg := src[i:]
+	if j := strings.Index(seg, "\n}"); j > 0 {
+		seg = seg[:j]
+	}
+	return strings.Contains(seg, "Priority")
 }

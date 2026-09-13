@@ -58,6 +58,27 @@ func cmdSDK(args []string) {
 		sdkHelp()
 		return
 	}
+	// install --from <本地目录> [version]：用本地 SDK 源码装一个版本并激活。
+	if args[0] == "install" {
+		from := ""
+		rest := []string{}
+		for i := 1; i < len(args); i++ {
+			if args[i] == "--from" && i+1 < len(args) {
+				from = args[i+1]
+				i++
+				continue
+			}
+			rest = append(rest, args[i])
+		}
+		if from != "" {
+			version := ""
+			if len(rest) > 0 && rest[0] != "latest" {
+				version = rest[0]
+			}
+			cmdSDKInstallFromDir(from, version)
+			return
+		}
+	}
 	switch args[0] {
 	case "list":
 		cmdSDKList()
@@ -100,7 +121,8 @@ Commands:
 Examples:
   hmapdev sdk install v0.7.1
   hmapdev sdk install latest
-  hmapdev sdk use v0.7.1
+  hmapdev sdk install v0.7.1
+  hmapdev sdk install --from /path/to/homeagent-sdk   # 用本地源码（SDK 开发时用）sdk use v0.7.1
 `)
 }
 
@@ -142,6 +164,51 @@ func cmdSDKList() {
 	if current == "" {
 		fmt.Println("\nNo version active. Use 'hmapdev sdk use <version>' to set one.")
 	}
+}
+
+// cmdSDKInstallFromDir 从**本地 SDK 源码目录**安装一个版本。
+//
+// 为什么需要它：`install` 只能从 Release 归档下载，而 SDK 开发时的新能力
+// （例如 `InjectOptions.Priority` 这类 proc 桥要透传的字段）往往还没发版 ——
+// 此时生成出来的插件工程会因为"引用的 SDK 还没有该字段"直接编译失败。
+// 有 --from 才能"用本地源码当这个版本的 SDK"，边改 SDK 边验证模板工程。
+func cmdSDKInstallFromDir(src, version string) {
+	store := sdkStore()
+	if err := os.MkdirAll(store, 0755); err != nil {
+		fmt.Printf("error: create SDK store %s: %v\n", store, err)
+		os.Exit(1)
+	}
+	if version == "" {
+		version = readMetaVersion(src)
+	}
+	if version == "" {
+		fmt.Printf("error: cannot determine version from %s/meta/meta.go\n", src)
+		os.Exit(1)
+	}
+	if !strings.HasPrefix(version, "v") {
+		version = "v" + version
+	}
+	if _, err := os.Stat(filepath.Join(src, "go.mod")); err != nil {
+		fmt.Printf("error: %s 看起来不是 SDK 源码目录（缺 go.mod）\n", src)
+		os.Exit(1)
+	}
+	dest := sdkVersionDir(version)
+	_ = os.RemoveAll(dest)
+	if err := copyDir(src, dest); err != nil {
+		fmt.Printf("error: copy %s -> %s: %v\n", src, dest, err)
+		os.Exit(1)
+	}
+	// 源码目录里的开发产物不该带进 store。
+	for _, junk := range []string{".git", "dist", "build"} {
+		_ = os.RemoveAll(filepath.Join(dest, junk))
+	}
+	fmt.Printf("Installed SDK %s from %s\n", version, src)
+	fmt.Printf("  %s\n", dest)
+	if err := os.WriteFile(filepath.Join(store, "current"), []byte(version), 0644); err != nil {
+		fmt.Printf("error: activate %s: %v\n", version, err)
+		os.Exit(1)
+	}
+	fmt.Printf("Activated SDK %s\n", version)
 }
 
 // cmdSDKInstall downloads and installs an SDK version from Release archive.
@@ -520,5 +587,3 @@ func readMetaVersion(sdkRoot string) string {
 	}
 	return "0.0.0"
 }
-
-

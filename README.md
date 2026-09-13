@@ -84,11 +84,15 @@ type Plugin interface {
 
 通过 `Start(sdk *PluginSDK)` 注入的 SDK 实例提供以下方法：
 
+> **通道的方向契约**：入站与出站是分开登记的两件事。凡是用 `InjectText*/InjectInput*/InjectInterrupt*`
+> 注入的通道名都要 `RegisterInputChannel` —— inputch 是内核最基本的**输入路由单位**，
+> 只有登记过的通道才能被"划给驻留子"；只登记出站通道时内核会兜底登记同名 inputch 并告警（兼容老插件）。
+
 | 分类 | 方法 | 说明 |
 |------|------|------|
 | 阶段钩子 | `RegisterStage(stage, handler, scope...)` | 注册阶段回调，scope 可选：`StageScopeGlobal`（全局，默认）或 `StageScopeOwnTools`（仅自己工具） |
-| 输入通道 | `RegisterInputChannel(name, def)` | 注册输入通道，def 为 `ChannelDef`（NoMemory/Cleaner） |
-| 输出通道 | `RegisterOutputChannel(name, caps, desc, def, handler)` | 注册输出通道，def 为 `ChannelDef`，caps 为能力位掩码 |
+| 输入通道 | `RegisterInputChannel(name, def)` | 注册输入通道（**入站**：谁会往这个通道注入输入），def 为 `ChannelDef`（NoMemory/Cleaner） |
+| 输出通道 | `RegisterOutputChannel(name, caps, desc, def, handler)` | 注册输出通道（**出站**：`output_send__<name>` 的回复发给谁），def 为 `ChannelDef`，caps 为能力位掩码 |
 | 工具注册 | `RegisterTool(name, def, handler)` | 注册工具供 LLM 调用 |
 | 插件 API | `RegisterPluginAPI(name)` | 注册插件 API 供其他插件访问 |
 | 图记忆 | `Memory()` | 访问图记忆 API（实体-关系存储） |

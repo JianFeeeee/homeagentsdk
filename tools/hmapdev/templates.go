@@ -49,6 +49,22 @@ func (p *Plugin) Start(s *sdk.PluginSDK) error {
 		DisplayName: "示例配置", Description: "An example configuration key",
 		Category: "{{.Plg.Name}}",
 	})
+	// ---- 通道（channel）：两个方向是分开的两件事 ----
+	//
+	// 入站 inputch ——「谁会往这个通道注入输入」。
+	//   凡是用 s.InjectText*/InjectInput*/InjectInterrupt*(source, "<name>", ...) 注入的通道名，
+	//   都要在这里登记：inputch 是内核最基本的**输入路由单位**，只有登记过的通道
+	//   才能被「划给驻留子（resident sub-agent）」；没登记就划分会失败（inputch 未注册）。
+	//   只登记出站通道时内核会兜底登记同名 inputch **并打告警**（兼容老插件）。
+	chName := p.name
+	_ = s.RegisterInputChannel(chName, sdk.ChannelDef{NoMemory: true})
+	// 出站 output ——「output_send__<name> 的回复发给谁」。
+	//    handler 收到 map：payload(string) / type(string) / meta(string|optional)。
+	_ = s.RegisterOutputChannel(chName, sdk.CapText, "示例通道（回复由此返回）",
+		sdk.ChannelDef{NoMemory: true}, func(args map[string]interface{}) (interface{}, error) {
+			return map[string]interface{}{"status": "ok"}, nil
+		})
+
 	tp := p.name + "_"
 	s.RegisterTool(tp+"hello", sdk.ToolDef{
 		Name:        tp + "hello",
@@ -148,6 +164,15 @@ const tmplMainLua = `-- {{.Plg.Name}} plugin
 local plugin = { name = "{{.Plg.Name}}" }
 function plugin.start(sdk)
   sdk.log("info", "{{.Plg.Name}} starting...")
+
+  -- 通道：入站与出站分开登记。
+  -- 入站 inputch：凡是用 sdk.inject_text/sdk.inject_interrupt(source, "<name>", ...) 注入的通道名
+  --   都要登记；只有登记过的通道才能被「划给驻留子」（没登记会报 inputch 未注册）。
+  sdk.register_input_channel("{{.Plg.Name}}", { no_memory = true })
+  -- 出站 output：output_send__<name> 的回复由 handler 处理
+  sdk.register_output_channel("{{.Plg.Name}}", 1, "示例通道（回复由此返回）", { no_memory = true },
+    function(args) return { status = "ok" } end)
+
   sdk.register_tool("{{.Plg.Name}}_hello", {
     description = "A hello world tool",
     parameters = { type = "object", properties = {} }
@@ -514,6 +539,21 @@ const tmplReadme = `# {{.Plg.Name}}
 ` + "```bash" + `
 hmapdev build
 ` + "```" + `
+
+## Channels
+
+入站与出站是分开登记的两件事：
+
+| 方向 | API | 用途 |
+|---|---|---|
+| 入站 inputch | RegisterInputChannel(name, def) | 声明「谁会往这个通道注入输入」。**凡是用 InjectText*/InjectInput*/InjectInterrupt*(source, "<name>", ...) 注入的通道名都要登记** |
+| 出站 output | RegisterOutputChannel(name, caps, desc, def, handler) | 声明 output_send__<name> 的回复发给谁；handler 收到 {payload,type,meta} |
+
+def（ChannelDef）描述该通道在记忆计算层的行为：NoMemory: true = 该通道输入不进记忆；
+Cleaner = 计算层清洗后再向量化/提关键词（原文不改）。
+
+> 只登记出站通道、却用同名通道注入输入时，内核会兜底登记同名 inputch 并在日志里告警。
+> 兜底只为兼容老插件 —— 请显式登记，让「这是入站通道」成为插件的明确意图。
 
 ## Install
 
