@@ -92,7 +92,7 @@ type Plugin interface {
 |------|------|------|
 | 阶段钩子 | `RegisterStage(stage, handler, scope...)` | 注册阶段回调，scope 可选：`StageScopeGlobal`（全局，默认）或 `StageScopeOwnTools`（仅自己工具） |
 | 输入通道 | `RegisterInputChannel(name, def)` | 注册输入通道（**入站**：谁会往这个通道注入输入），def 为 `ChannelDef`（NoMemory/Cleaner） |
-| 输出通道 | `RegisterOutputChannel(name, caps, desc, def, handler)` | 注册输出通道（**出站**：`output_send__<name>` 的回复发给谁），def 为 `ChannelDef`，caps 为能力位掩码 |
+| 输出通道 | `RegisterOutputChannel(name, caps, desc, def, handler)` | 注册输出通道（**出站**：`output_send__<name>` 的回复发给谁），def 为 `ChannelDef`，caps 为能力位掩码。⚠️ 通道名只能用 `[A-Za-z0-9_-]`（见下方"输出通道"一节的命名约束） |
 | 工具注册 | `RegisterTool(name, def, handler)` | 注册工具供 LLM 调用 |
 | 插件 API | `RegisterPluginAPI(name)` | 注册插件 API 供其他插件访问 |
 | 图记忆 | `Memory()` | 访问图记忆 API（实体-关系存储） |
@@ -138,6 +138,14 @@ sdk.RegisterInputChannel("qq", ChannelDef{
 ```
 
 ### 输出通道
+
+> ⚠️ **命名约束（会进 LLM 函数名）**：内核按 `output_send__<name>` 生成工具，
+> 而上游对函数名的规范是 `^[a-zA-Z0-9_-]{1,64}$`。名字违规的后果不是
+> "这个工具不可用"，而是**整条请求被 400 拒绝**（`Invalid 'tools[N].function.name'`），
+> 网关 auto tier 全链条失败，表现成**整个 agent 不回应**。
+> 所以 `name` 只能用 `[A-Za-z0-9_-]`，并留出 `output_send__`（13 字符）的余量。
+> 名字若来自外部输入（设备自报 id 之类），请在插件侧派生一个合规且唯一的名字 ——
+> 内核**不会**替你净化。
 
 ```go
 sdk.RegisterOutputChannel("my-channel", CapText|CapFile, "通道描述", ChannelDef{}, handler)
