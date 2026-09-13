@@ -202,3 +202,36 @@ func TestZeroLimitsMeanUnlimited(t *testing.T) {
 		}
 	}
 }
+
+// 降权（本轮无法精确匹配可信 OneBot 事件 ⇒ auth={active:true}、无 peer、非 owner）时，
+// **输出仍必须放行**：发到哪个会话由 agent 自己给的 meta 决定，
+// 不该被「当前会话身份」挡住。现场：被子的中断唤醒的一轮里，父带齐 meta 也发不出去
+// （报「可信 QQ 会话身份不完整」）。
+//
+// 反之，**读取类**工具在降权时仍受当前会话限制 —— 那才是真的不能跨会话读。
+func TestDowngradedAuthStillAllowsQQOutput(t *testing.T) {
+	p := newPermissionTestPlugin(t)
+	p.auth = qqAuthContext{active: true}
+	p.privateToolAllowlist = []string{"output_send__qq", "qq_get_history"}
+	p.groupToolAllowlists = map[int64][]string{0: {"output_send__qq", "qq_get_history"}}
+
+	ctx := toolCallContext("output_send__qq", map[string]interface{}{
+		"payload": "带齐 meta 的主动发送",
+		"type":    "text",
+		"meta":    `{"user_id":2198972886}`,
+	})
+	if err := p.beforeToolcall(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if ctx.Response != nil {
+		t.Fatalf("降权时输出被拒: %s", *ctx.Response)
+	}
+
+	ctx2 := toolCallContext("qq_get_history", map[string]interface{}{"group_id": 1027993713})
+	if err := p.beforeToolcall(ctx2); err != nil {
+		t.Fatal(err)
+	}
+	if ctx2.Response == nil || !strings.Contains(*ctx2.Response, "可信 QQ 会话身份不完整") {
+		t.Fatalf("读取类工具在降权时应被当前会话限制挡住: %#v", ctx2.Response)
+	}
+}
