@@ -12,14 +12,31 @@
 #
 # 环境：
 #   HMAPDEV    hmapdev 可执行文件（默认取 PATH 上的 hmapdev）
-#   OUT        产物目录（默认 <script>/../../dist/plugins）
+#   OUT        产物目录。默认取**内核仓**的 dist/plugins（upload_assets.py 认这个位置），
+#              以便直接随 release 发布；不在内核仓内时回退到 SDK 仓的 dist/plugins。
 #   JOBS       并行度（默认 CPU 核数）
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-EX_DIR="$(cd "$SCRIPT_DIR/../example" && pwd)"
 SDK_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-OUT="${OUT:-$(cd "$SDK_DIR/.." && pwd)/dist/plugins}"
+
+# 默认产物落到内核仓的 dist/plugins。判定方式：从 SDK 目录向上找“含 internal/ 与
+# go.mod”的目录（即内核仓根），找不到就用 SDK 仓自己的 dist/plugins。
+# 为何不写死 ../../：SDK 仓在主仓里是 third_party/homeagent-sdk，但也可以被单独
+# clone 出来，写死相对路径会把产物丢到仓外或 third_party/dist。
+default_out() {
+  local d="$SDK_DIR"
+  for _ in 1 2 3 4; do
+    d="$(cd "$d/.." && pwd)"
+    if [ -f "$d/go.mod" ] && [ -d "$d/internal" ]; then
+      echo "$d/dist/plugins"; return
+    fi
+  done
+  echo "$SDK_DIR/dist/plugins"
+}
+
+EX_DIR="$SDK_DIR/example"
+OUT="${OUT:-$(default_out)}"
 HMAPDEV="${HMAPDEV:-hmapdev}"
 
 command -v "$HMAPDEV" >/dev/null 2>&1 || {
