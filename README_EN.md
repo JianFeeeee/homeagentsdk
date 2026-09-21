@@ -443,6 +443,19 @@ enabled := sdk.AutoRestart()
 
 The platform automatically restarts the plugin on crash, ensuring service availability.
 
+Restarts are **rate-limited**. Defaults (kernel `internal/plugin/registry.go`):
+
+| Parameter | Value | Meaning |
+|---|---|---|
+| `procRestartBackoff` | `1s` | Before restart #n, wait `n × 1s` (linear backoff, not immediate) |
+| `procMaxRestarts` | `3` | Max restarts within the window |
+| `procCrashWindow` | `5min` | No new crash within the window resets the count |
+
+So the actual sequence is **1s → 2s → 3s**; the **4th** crash in the same 5-minute
+window (`n > 3`) is **not** restarted automatically and needs manual intervention.
+This is not instant, invisible recovery — if your plugin must be back in seconds,
+reconnect and rebuild your own state in `OnStart`.
+
 > ⚠️ `SetAutoRestart` is typically used to decide whether auto-restart is safe *after* an
 > external connection has been established, and that connection setup usually happens in a
 > background goroutine while the kernel reads the flag from another one — which is inherently
