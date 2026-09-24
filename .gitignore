@@ -40,3 +40,8 @@ tools/plugindev/plugindev
 site_build/
 # mkdocs 缓存
 .cache/
+
+# agent 入口的「全文汇总」是派生件：由 gensite 把 docs/ 下所有 Markdown 拼成一份，
+# 每次改任何一页都会整份重写（115KB），进版本库只产生噪声。它由构建产出，
+# llms.txt（索引，小且稳定）仍提交。
+docs/llms-full.txt

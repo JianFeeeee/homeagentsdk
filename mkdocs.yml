@@ -11,12 +11,18 @@ site_description: 用 Go 或 Lua 为 HomeAgent 编写插件 —— API 参考与
 site_url: https://sdk.homeagent.jianfgit.xyz/
 copyright: MIT 许可 · JianFeeeee
 
+# 主题覆盖目录：只覆盖 footer.html（补备案号，见该文件里的说明）。
 docs_dir: docs
 site_dir: site_build
 
 theme:
   name: material
   language: zh
+  # custom_dir 必须写在 theme 下（顶层会被判为未知配置）。
+  custom_dir: overrides
+  # 品牌图标：与主站 introduce 同一份 logo（曾用 Material 默认，不是我们的）。
+  logo: assets/logo-mark.svg
+  favicon: assets/logo.svg
   features:
     - navigation.instant
     - navigation.instant.progress

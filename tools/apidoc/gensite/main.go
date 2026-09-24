@@ -304,6 +304,14 @@ func main() {
 		log.Fatal(err)
 	}
 
+	// 给 agent 的入口：llms.txt / llms-full.txt（Markdown 正文汇总）。
+	// 每个页面的 .md 副本由 build.sh 在 docs/ 定稿后统一复制进站点产物。
+	pages, err := writeAgentEntrypoints(*outDir, "")
+	if err != nil {
+		log.Fatalf("生成 agent 入口失败: %v", err)
+	}
+	fmt.Fprintf(os.Stderr, "agent 入口：llms.txt + llms-full.txt（覆盖 %d 个页面）\n", pages)
+
 	sort.Slice(pkg.Symbols, func(i, j int) bool { return pkg.Symbols[i].Name < pkg.Symbols[j].Name })
 	fmt.Fprintf(os.Stderr, "生成 %d 个章节 + 检索索引 %d 条 → %s\n",
 		len(sections), len(index), apiDir)
