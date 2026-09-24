@@ -1,0 +1,128 @@
+# HomeAgent 插件 SDK 文档站配置。
+#
+# 设计取舍：
+#   - 每页顶部都放「版本 + 编辑链接」，因为 SDK 与内核的协议版本会错配，
+#     读者必须先能确认自己看的是哪一版。
+#   - 中文检索依赖 jieba（已装）；英文走内置分词。两者都不要额外服务。
+#   - docs/api/*.md 是**生成物**（tools/apidoc/gensite），页首会写明，防止手改。
+
+site_name: HomeAgent 插件 SDK
+site_description: 用 Go 或 Lua 为 HomeAgent 编写插件 —— API 参考与开发指南
+site_url: https://sdk.homeagent.jianfgit.xyz/
+copyright: MIT 许可 · JianFeeeee
+
+docs_dir: docs
+site_dir: site_build
+
+theme:
+  name: material
+  language: zh
+  features:
+    - navigation.instant
+    - navigation.instant.progress
+    - navigation.tracking
+    - navigation.tabs
+    - navigation.sections
+    - navigation.indexes
+    - navigation.top
+    - toc.follow
+    - search.suggest
+    - search.highlight
+    - search.share
+    - content.code.copy
+    - content.code.annotate
+    - content.action.edit
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-night
+        name: 切换到深色
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: 切换到浅色
+  icon:
+    repo: fontawesome/brands/git-alt
+
+plugins:
+  - search:
+      lang:
+        - zh
+        - en
+      separator: '[\s\u200b\-]'
+      # 中文按词切（jieba），否则整句变一个 token，检索不到。
+      jieba_dict: null
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+      toc_depth: 3
+  - pymdownx.details
+  # Material 的图标语法 :material-xxx: / :octicons-xxx: 依赖这个扩展。
+  # 没开时它们会**原样显示为文本**（实测首页四个卡片全花了）。
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+
+extra:
+  generator: false
+  social:
+    - icon: fontawesome/solid/code
+      link: https://gitcode.com/JianFeeeee/homeagent-sdk
+      name: SDK 源码
+  # 自定义检索端点在 docs/javascripts/api-search.js 里注册，
+  # 索引文件由 gensite 产出：docs/assets/api-index.json
+
+nav:
+  - 首页: index.md
+  - 快速开始:
+      - 环境与工具链: guide/getting-started.md
+      - 第一个 Go 插件: guide/first-plugin.md
+      - 第一个 Lua 插件: guide/first-lua-plugin.md
+  - API 参考:
+      - api/index.md
+      - 工具（Tools）: api/tools.md
+      - 阶段钩子（Stages）: api/stages.md
+      - 记忆（Memory）: api/memory.md
+      - 输入/输出通道: api/channels.md
+      - 配置（Settings）: api/settings.md
+      - 生命周期（Lifecycle）: api/lifecycle.md
+      - 事件（Events）: api/events.md
+      - LLM 调用: api/llm.md
+      - 常量与枚举: api/constants.md
+      - 桥接装配点: api/bridge.md
+      - 其他类型: api/misc.md
+      - 仅内置插件可用: api/builtin-only.md
+  - 指南:
+      - 能力边界（哪些 API 外部可用）: guide/capability-boundary.md
+      - 打包与发布: guide/packaging.md
+      - 多平台构建: guide/multi-platform.md
+      - 受限 SDK 与安全: guide/security.md
+  - 示例插件:
+      - 总览: examples/index.md
+  - 版本与兼容: versions.md
+
+extra_css:
+  - stylesheets/extra.css
+
+extra_javascript:
+  - javascripts/api-search.js

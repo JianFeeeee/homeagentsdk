@@ -1,0 +1,157 @@
+{
+  "_doc": [
+    "能力分层表：决定文档站上每个 API 的可见级别。",
+    "",
+    "tier 取值：",
+    "  public  —— 外部（第三方）插件可用。这是文档站的主体。",
+    "  builtin —— 仅内核内置插件可用。外部插件调用会失败或拿到 nil。",
+    "  bridge  —— 由桥接运行时注入的装配点（SetXxxAPI），插件业务代码不该调；",
+    "             但它是公开 SDK 的一部分，故列出并标注用途。",
+    "",
+    "**每条判断都必须能追溯到源码**，依据记在 reason 里。不要凭文档注释推测——",
+    "实测发现文档与源码有三处不符（见下 tier_overrides 的注释）。"
+  ],
+
+  "public": {
+    "_source": "hmapdev 桥接模板 tools/hmapdev/templates/proc_main.go.tmpl 的 buildPluginSDK()：凡被 base.Set* 注入或在 procIO/procMemory/... 上实现的，外部插件都能真调到。",
+    "methods": [
+      "PluginName",
+      "Settings",
+      "Memory", "TextMemory", "DocMemory", "Knowledge", "LLM", "Social",
+      "PluginMgr",
+      "RegisterTool", "RegisterStage", "RegisterPluginAPI",
+      "RegisterOutputChannel", "RegisterInputChannel",
+      "InjectText", "InjectTextNoMemory", "InjectTextOpts",
+      "InjectInterruptText", "InjectInterruptTextOpts",
+      "InjectInputSync", "InjectInputSyncOpts",
+      "InjectInputMedia", "InjectInputMediaSync", "InjectInputMediaOpts",
+      "InjectInputMediaSyncOpts", "InjectInterruptMedia", "InjectInterruptMediaOpts",
+      "SetToolBlocks",
+      "SetAutoRestart", "AutoRestart",
+      "RegisterStopHandler", "RunStopHandlers",
+      "RegisterOnRemoveHandler", "RunOnRemoveHandlers"
+    ]
+  },
+
+  "bridge": {
+    "_doc": "桥接注入点：公开 SDK 的装配接口，外部插件的**业务代码不调用**它们，由 hmapdev 生成的运行时调用。文档里单列一节说明，不与业务 API 混排。",
+    "_source": "proc_main.go.tmpl:685-705 逐个 base.Set* 调用。",
+    "methods": [
+      "SetIOInjector", "SetMemoryAPI", "SetTextMemoryAPI", "SetDocMemoryAPI",
+      "SetKnowledgeAPI", "SetLLMAPI", "SetSocialAPI", "SetPluginMgrAPI",
+      "SetInputChannelRegistrar",
+      "SetOutputChannelRegistrar", "SetOutputChannelUnregistrar",
+      "SetEventSubscriber"
+    ]
+  },
+
+  "tier_overrides": {
+    "_doc": [
+      "逐符号的边界裁定。键是符号名，值是 {tier, reason}。",
+      "reason 必须写出**可复核的依据**（文件:行 或 grep 结论），不接受「大概」。"
+    ],
+
+    "Events": {
+      "tier": "builtin",
+      "reason": "实测全仓 SetEventSubscriber 只有定义、无任何调用点（grep -rn SetEventSubscriber --include=*.go 仅命中 sdk/plugin.go 的定义与 lua_plugin.go 的一句注释）。外部插件拿到的 Events() 恒为 nil。外部插件订阅事件走的是桥接运行时的 events.subscribe RPC（proc_main.go.tmpl:1421 在插件侧分发、内核 protocol.go MethodEventsSubscribe），Lua 插件则走内部 SDK 的 Subscribe。这正是 PLUGIN_DEV.md 里没有说清的一处。"
+    },
+
+    "SetEventSubscriber": {
+      "tier": "builtin",
+      "reason": "同上：无调用点。标 builtin 而非 bridge，因为连桥接运行时都不注入它——外部插件无法用它获得事件订阅能力。"
+    },
+
+    "UnregisterOutputChannel": {
+      "tier": "builtin",
+      "reason": "外部插件的桥接模板只注入 SetOutputChannelRegistrar（proc_main.go.tmpl:693-705），**未**注入 SetOutputChannelUnregistrar（grep Unregistrar 在 templates/ 下无命中）。因此外部插件的 regOutputUnreg 为 nil，UnregisterOutputChannel 会命中 `if reg != nil` 的 else 分支**直接返回 nil**（sdk/plugin.go:539-549）——即**静默无效**：不报错、通道也没注销。内置插件由 internal/sdk/plugin.go:330 注入 cfg.RegOutputUnreg，真正生效。外部插件要让通道下线，只能重载插件。"
+    },
+
+    "SetOutputChannelUnregistrar": {
+      "tier": "builtin",
+      "reason": "同上，桥接模板不注入。"
+    },
+
+    "PluginMgr": {
+      "tier": "public",
+      "reason": "proc_main.go.tmpl:692 显式注入 base.SetPluginMgrAPI(procPluginMgr{})，且 sdk/plugin.go:282 注释写明「外部插件可调用」。注意返回的 PluginMgrAPI 只有 3 个方法（ReloadOne / ListLoadedPlugins / IsPluginDisabled），与 internal/sdk 的完整 PluginManager（含 ReloadPlugins / DisablePlugin / RemovePlugin / ListDisabledPlugins / IsBuiltinPlugin 等）**不是同一个接口**——同名不同包，文档必须分清。PLUGIN_DEV.md:786 写「PluginMgr() 仅内置插件可用」是**错的**，已在本站更正。"
+    },
+
+    "SetToolBlocks": {
+      "tier": "public",
+      "reason": "procIO 实现了它（proc_main.go.tmpl:749），模板在 base.SetIOInjector(procIO{}) 中注入。"
+    },
+
+    "RunStopHandlers": {
+      "tier": "public",
+      "reason": "由生成的运行时在收到 plugin.stop 时调用（proc_main.go.tmpl:1274、1659），插件注册的 stop handler 由此触发；插件业务代码也可直接调。"
+    },
+
+    "RunOnRemoveHandlers": {
+      "tier": "public",
+      "reason": "与 RunStopHandlers 同源；onRemove 语义见 sdk/plugin.go:824。"
+    },
+
+    "PriorityL4": {
+      "tier": "builtin",
+      "reason": "sdk/plugin.go:119-126 明确：L1..L3 任何插件可声明，L4 只有内核级插件可用，外部插件声明会被内核夹到 L3（内核侧有 priority_clamp_test.go 守着）。外部插件文档应说明「声明 L4 无效」。"
+    },
+
+    "Subscribe": {
+      "tier": "builtin",
+      "reason": "Subscribe 只存在于内部 SDK（internal/sdk）与 Lua 桥；公开 sdk 的 EventSubscriber 接口虽声明了 Subscribe，但该接口实例在外部插件路径上恒为 nil（见 Events 条目）。"
+    },
+
+    "Publish": {
+      "tier": "builtin",
+      "reason": "Publish 只在 internal/sdk/plugin.go:465（内置插件面）。公开 SDK 的 EventSubscriber 接口刻意只有 Subscribe 没有 Publish——sdk/plugin.go:276 注释「restricted interface: plugins can subscribe but the kernel controls which events are delivered」。"
+    },
+
+    "OutputChan": {
+      "tier": "builtin",
+      "reason": "只存在于 internal/sdk/plugin.go:438。外部插件的输出能力是 RegisterOutputChannel + 内核回调（output.invoke），不是自己持有 chan。"
+    },
+
+    "RegisterChannel": {
+      "tier": "builtin",
+      "reason": "internal/sdk/plugin.go:445 的内部面（agentIO.Device 直接注册）。外部插件用公开的 RegisterInputChannel / RegisterOutputChannel。"
+    },
+
+    "ListChannels": {
+      "tier": "builtin",
+      "reason": "internal/sdk/plugin.go:458。PLUGIN_DEV.md:530 已正确说明这些方法（RegisterChannel/UnregisterChannel/ListChannels/InjectInput 等）仅内置插件可用。"
+    },
+
+    "InjectInput": {
+      "tier": "builtin",
+      "reason": "internal/sdk/plugin.go:413。外部插件用公开的 InjectText / InjectInputSync / InjectTextOpts 等。"
+    },
+
+    "InjectInterrupt": {
+      "tier": "builtin",
+      "reason": "internal/sdk/plugin.go:420。外部插件用 InjectInterruptText / InjectInterruptMedia。"
+    }
+  },
+
+  "interfaces": {
+    "_doc": "接口级裁定：外部插件拿到的是「受限接口」，方法是子集。",
+    "SocialAPI": {
+      "tier": "public",
+      "reason": "外部插件由 proc_main.go.tmpl:690 注入 procSocial。注意公开 SocialAPI 只有 6 个**只读**方法（GetPerson/GetTrait/GetRelations/GetNetwork/ListPersons + 见 sdk/memory.go:100）。写操作（SetTrait/AddRelation 等）不在公开接口里——这是「受限 SDK」的实现方式：**按接口裁剪，而非按方法裁剪**。"
+    },
+    "EventSubscriber": {
+      "tier": "builtin",
+      "reason": "接口在公开包里，但实例恒 nil（见 Events）。"
+    },
+    "MemoryAPI": { "tier": "public", "reason": "proc_main.go.tmpl:686 注入 procMemory。" },
+    "TextMemoryAPI": { "tier": "public", "reason": "proc_main.go.tmpl:691。" },
+    "DocMemoryAPI": { "tier": "public", "reason": "proc_main.go.tmpl:687。" },
+    "KnowledgeAPI": { "tier": "public", "reason": "proc_main.go.tmpl:688。" },
+    "LLMAPI": { "tier": "public", "reason": "proc_main.go.tmpl:689。" },
+    "SettingsAPI": { "tier": "public", "reason": "sdk 构造函数第三参数注入 procSettings（proc_main.go.tmpl:640）。" },
+    "IOInjector": { "tier": "public", "reason": "proc_main.go.tmpl:685 注入 procIO。" },
+    "PluginMgrAPI": {
+      "tier": "public",
+      "reason": "proc_main.go.tmpl:692。只有 3 个方法——与内部 PluginManager 不同。"
+    }
+  }
+}

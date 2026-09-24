@@ -1,0 +1,115 @@
+/* API 即时检索与文档站的少量本地样式。
+   只补 Material 没覆盖的部分，不覆盖主题变量（保持深浅色自动适配）。 */
+
+#api-search {
+  margin: 1.2rem 0 2rem;
+}
+
+.api-input {
+  width: 100%;
+  padding: 0.7rem 0.9rem;
+  font-size: 1rem;
+  border: 1px solid var(--md-default-fg-color--lightest);
+  border-radius: 0.3rem;
+  background: var(--md-default-bg-color);
+  color: var(--md-default-fg-color);
+}
+
+.api-input:focus {
+  outline: 2px solid var(--md-accent-fg-color);
+  outline-offset: 1px;
+  border-color: transparent;
+}
+
+.api-hint {
+  color: var(--md-default-fg-color--light);
+  font-size: 0.8rem;
+  margin: 0.6rem 0 0;
+}
+
+.api-count {
+  color: var(--md-default-fg-color--light);
+  font-size: 0.75rem;
+  margin: 0.8rem 0 0.4rem;
+}
+
+.api-results {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.api-result {
+  padding: 0.55rem 0.6rem;
+  border-left: 3px solid var(--md-primary-fg-color);
+  margin-bottom: 0.4rem;
+  background: var(--md-code-bg-color);
+  border-radius: 0 0.2rem 0.2rem 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.45rem;
+}
+
+.api-name {
+  font-family: var(--md-code-font-family, monospace);
+  font-weight: 700;
+  font-size: 0.85rem;
+}
+
+.api-sig {
+  font-size: 0.72rem;
+  color: var(--md-default-fg-color--light);
+  background: none;
+  padding: 0;
+  overflow-wrap: anywhere;
+}
+
+.api-desc {
+  flex-basis: 100%;
+  font-size: 0.78rem;
+  color: var(--md-default-fg-color--light);
+}
+
+.api-loc {
+  flex-basis: 100%;
+  font-size: 0.68rem;
+  color: var(--md-default-fg-color--lighter, var(--md-default-fg-color--light));
+  font-family: var(--md-code-font-family, monospace);
+}
+
+.api-badge {
+  font-size: 0.62rem;
+  padding: 0.08rem 0.34rem;
+  border-radius: 0.6rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.api-badge-builtin {
+  background: rgba(245, 158, 11, 0.18);
+  color: #b45309;
+  border: 1px solid rgba(245, 158, 11, 0.5);
+}
+
+[data-md-color-scheme="slate"] .api-badge-builtin {
+  color: #fbbf24;
+}
+
+/* 「仅内置」告警块里的依据说明通常很长，窄屏下允许更小字号。 */
+@media screen and (max-width: 44.98em) {
+  .api-sig { font-size: 0.68rem; }
+}
+
+/* 签名与长类型定义可能超出正文宽度（如 ContentBlock 的字段列表）。
+   highlight 代码块默认不换行，靠横向滚动；把默认改为换行显示，
+   因为文档读者更希望一眼看全签名而不是拖滚动条。 */
+.md-typeset pre > code {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* 接口方法表里的签名可能很长，允许在任意位置折行。 */
+.md-typeset table code {
+  overflow-wrap: anywhere;
+}

@@ -35,3 +35,8 @@ z_entry.c
 
 # plugindev binary in tools/
 tools/plugindev/plugindev
+
+# 文档站构建产物（由 tools/apidoc/build.sh 生成）
+site_build/
+# mkdocs 缓存
+.cache/
