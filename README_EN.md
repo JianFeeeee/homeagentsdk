@@ -849,14 +849,18 @@ Or upload via the WebUI plugin management page, or manually place the `.hmap` in
 
 ## License
 
-The SDK is released under **AGPL-3.0-only** — see [LICENSE](LICENSE).
+The SDK is released under the **MIT license** — see [LICENSE](LICENSE).
 
-**This is a substantive constraint for plugin developers**: the SDK is **statically linked** into
-your plugin (its source ends up in the plugin binary), so the plugin is a derivative work of
-this SDK and **must be released under the same license**. Because AGPL §13 covers network
-interaction, a plugin that serves users over HTTP/WebSocket must also offer them the source.
-If you need a closed-source plugin, the only compliant route is a separate exception/commercial
-license from this project — none is offered today.
+**This permissiveness is deliberate**: the SDK is **statically linked** into your plugin
+(its source ends up in the plugin binary). Under a copyleft license such as AGPL that would
+force plugin authors to open-source their work; MIT exists precisely so that plugin authors
+can **pick their own license** — closed-source, commercial or private — with no obligation to
+contribute back and no need for any exception or commercial grant. The safety and vitality of
+the third-party plugin ecosystem rest on this.
+
+This is sound because the SDK is **fully self-contained**: `go.mod` has zero external
+dependencies and `sdk/` imports only the Go standard library (`sync`), never any code from the
+core repository — so the MIT grant conflicts with nothing.
 
 Third-party components (Go dependencies: go-sqlite3, gojieba, bubbletea, … — MIT / BSD-3 /
 Apache-2.0) keep their own licenses. The platform-side model and inference runtime
