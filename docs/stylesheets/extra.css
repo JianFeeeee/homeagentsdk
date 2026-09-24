@@ -71,6 +71,14 @@
   color: var(--md-default-fg-color--light);
 }
 
+/* 「为何命中」的中文关键词（keywords.json 产出）。 */
+.api-kw {
+  flex-basis: 100%;
+  font-size: 0.7rem;
+  color: var(--md-accent-fg-color);
+  opacity: 0.9;
+}
+
 .api-loc {
   flex-basis: 100%;
   font-size: 0.68rem;

@@ -65,6 +65,17 @@
     else if (name.indexOf(ql) === 0) s += 600;
     else if (name.indexOf(ql) > 0) s += 350;
 
+    // 中文检索关键词（keywords.json 产出，字段 g）。
+    // 为什么需要：SDK 里 66/100 个符号是英文注释（`RegisterTool registers a
+    // tool that the LLM can call.`），懂中文的人搜「注册工具」会一条都找不到。
+    // 关键词命中给较高权重（仅次于名称精确命中），因为它就是为「按功能找」准备的。
+    var kws = item.g || [];
+    for (var ki = 0; ki < kws.length; ki++) {
+      var kw = String(kws[ki]).toLowerCase();
+      if (kw === ql) { s += 480; break; }
+      if (kw.indexOf(ql) >= 0) { s += 300; break; }
+    }
+
     // 限定符：PluginSDK.RegisterTool / IOInjector.InjectText。
     // 额外支持「去掉 API/SDK 后缀」与「去掉点号」两种写法，
     // 因为读者习惯写 `memory.recall`（RPC 名），而 Go 名是 `MemoryAPI.Recall`。
@@ -94,13 +105,17 @@
     }
 
     // 中文按字匹配：中文没有词边界，逐字命中比整串更实用。
+    // 注意只把它当作**弱信号**：光靠逐字会把「注册工具」匹到凡是含「工具」
+    // 字样的任何东西（实测 ContextPolicyNone 的说明里有「工具调用」也会命中）。
+    // 所以阈值卡在 60% 以上才算有效命中。
     if (/[\u4e00-\u9fa5]/.test(q)) {
       var hit = 0;
+      var hay = desc + " " + kws.join(" ");
       for (var i = 0; i < q.length; i++) {
-        if (desc.indexOf(q[i]) >= 0) hit++;
+        if (hay.indexOf(q[i]) >= 0) hit++;
       }
-      if (hit === q.length) s += 100; // 全部字都出现
-      else s += hit * 8;
+      var ratio = hit / q.length;
+      if (ratio >= 0.6) s += Math.round(hit * 6);
     }
 
     // 公开 API 略优先于「仅内置」——后者通常是噪声。
@@ -172,6 +187,10 @@
       if (it.d) {
         var d = el("span", "api-desc", it.d);
         li.appendChild(d);
+      }
+      // 关键词是给检索用的；显示出来能让读者明白“为什么这条被匹配到”。
+      if (it.g && it.g.length) {
+        li.appendChild(el("span", "api-kw", it.g.slice(0, 6).join(" · ")));
       }
       if (it.f) {
         li.appendChild(el("span", "api-loc", it.f + (it.l ? ":" + it.l : "")));

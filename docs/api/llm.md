@@ -48,13 +48,3 @@ LLM returns the LLM provider API (may be nil if not available).
 
 <small>`plugin.go:432`</small>
 
-### `LLMAPI`
-
-```go
-type LLMAPI interface { ListSources() []string SetSource(name string) error CurrentSource() string }
-```
-
-LLMAPI provides access to the LLM provider manager.
-
-<small>`llm.go:4`</small>
-

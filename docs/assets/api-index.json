@@ -19,7 +19,10 @@
     "p": "memory",
     "b": false,
     "f": "knowledge.go",
-    "l": 6
+    "l": 6,
+    "g": [
+      "添加知识"
+    ]
   },
   {
     "n": "Append",
@@ -30,7 +33,10 @@
     "p": "memory",
     "b": false,
     "f": "memory.go",
-    "l": 44
+    "l": 44,
+    "g": [
+      "追加文本"
+    ]
   },
   {
     "n": "AudioURL",
@@ -52,7 +58,13 @@
     "p": "lifecycle",
     "b": false,
     "f": "plugin.go",
-    "l": 791
+    "l": 791,
+    "g": [
+      "自动重启",
+      "崩溃自愈",
+      "故障恢复",
+      "查询是否自动重启"
+    ]
   },
   {
     "n": "CapAudio",
@@ -63,7 +75,10 @@
     "p": "channels",
     "b": false,
     "f": "plugin.go",
-    "l": 331
+    "l": 331,
+    "g": [
+      "音频能力"
+    ]
   },
   {
     "n": "CapFile",
@@ -74,7 +89,10 @@
     "p": "channels",
     "b": false,
     "f": "plugin.go",
-    "l": 329
+    "l": 329,
+    "g": [
+      "文件能力"
+    ]
   },
   {
     "n": "CapImage",
@@ -85,7 +103,10 @@
     "p": "channels",
     "b": false,
     "f": "plugin.go",
-    "l": 330
+    "l": 330,
+    "g": [
+      "图片能力"
+    ]
   },
   {
     "n": "CapStructured",
@@ -96,7 +117,10 @@
     "p": "channels",
     "b": false,
     "f": "plugin.go",
-    "l": 332
+    "l": 332,
+    "g": [
+      "结构化能力"
+    ]
   },
   {
     "n": "CapText",
@@ -107,7 +131,10 @@
     "p": "channels",
     "b": false,
     "f": "plugin.go",
-    "l": 328
+    "l": 328,
+    "g": [
+      "文本能力"
+    ]
   },
   {
     "n": "ChannelDef",
@@ -118,7 +145,12 @@
     "p": "channels",
     "b": false,
     "f": "plugin.go",
-    "l": 139
+    "l": 139,
+    "g": [
+      "通道",
+      "频道",
+      "通道定义"
+    ]
   },
   {
     "n": "Commit",
@@ -129,7 +161,11 @@
     "p": "memory",
     "b": false,
     "f": "memory.go",
-    "l": 6
+    "l": 6,
+    "g": [
+      "写入记忆",
+      "提交三元组"
+    ]
   },
   {
     "n": "ConfigDef",
@@ -140,7 +176,10 @@
     "p": "settings",
     "b": false,
     "f": "settings.go",
-    "l": 50
+    "l": 50,
+    "g": [
+      "配置项定义"
+    ]
   },
   {
     "n": "ContentBlock",
@@ -151,7 +190,12 @@
     "p": "tools",
     "b": false,
     "f": "plugin.go",
-    "l": 850
+    "l": 850,
+    "g": [
+      "多模态内容块",
+      "图片块",
+      "音频块"
+    ]
   },
   {
     "n": "ContextPolicyNone",
@@ -162,7 +206,12 @@
     "p": "channels",
     "b": false,
     "f": "plugin.go",
-    "l": 44
+    "l": 44,
+    "g": [
+      "策略",
+      "不裁剪上下文",
+      "默认裁剪策略"
+    ]
   },
   {
     "n": "ContextPolicyPrune",
@@ -173,7 +222,12 @@
     "p": "channels",
     "b": false,
     "f": "plugin.go",
-    "l": 45
+    "l": 45,
+    "g": [
+      "策略",
+      "裁剪上下文",
+      "归档丢弃"
+    ]
   },
   {
     "n": "CurrentSource",
@@ -184,7 +238,10 @@
     "p": "llm",
     "b": false,
     "f": "llm.go",
-    "l": 7
+    "l": 7,
+    "g": [
+      "当前模型来源"
+    ]
   },
   {
     "n": "DataDir",
@@ -195,7 +252,10 @@
     "p": "settings",
     "b": false,
     "f": "settings.go",
-    "l": 25
+    "l": 25,
+    "g": [
+      "数据目录"
+    ]
   },
   {
     "n": "Defs",
@@ -206,7 +266,10 @@
     "p": "settings",
     "b": false,
     "f": "settings.go",
-    "l": 40
+    "l": 40,
+    "g": [
+      "配置定义列表"
+    ]
   },
   {
     "n": "Doc",
@@ -217,7 +280,11 @@
     "p": "memory",
     "b": false,
     "f": "memory.go",
-    "l": 89
+    "l": 89,
+    "g": [
+      "文档",
+      "文档对象"
+    ]
   },
   {
     "n": "DocMemory",
@@ -228,7 +295,12 @@
     "p": "memory",
     "b": false,
     "f": "plugin.go",
-    "l": 418
+    "l": 418,
+    "g": [
+      "记忆",
+      "内存",
+      "文档"
+    ]
   },
   {
     "n": "DocMemoryAPI",
@@ -242,17 +314,6 @@
     "l": 0
   },
   {
-    "n": "DocMemoryAPI",
-    "s": "type DocMemoryAPI interface { Query(text string, topK int) []*Doc Insert(doc *Doc) error // InsertWithMedia 写入文档并关联媒体。attachments 里带 Data 的会落进 …",
-    "d": "DocMemoryAPI provides access to the document vector store.",
-    "k": "type",
-    "r": "",
-    "p": "memory",
-    "b": false,
-    "f": "memory.go",
-    "l": 74
-  },
-  {
     "n": "Dump",
     "s": "Dump() map[string]interface{}",
     "d": "Dump returns all config values.",
@@ -261,7 +322,10 @@
     "p": "settings",
     "b": false,
     "f": "settings.go",
-    "l": 43
+    "l": 43,
+    "g": [
+      "导出配置"
+    ]
   },
   {
     "n": "Entity",
@@ -272,7 +336,11 @@
     "p": "memory",
     "b": false,
     "f": "memory.go",
-    "l": 13
+    "l": 13,
+    "g": [
+      "实体",
+      "记忆主体"
+    ]
   },
   {
     "n": "Event",
@@ -283,7 +351,11 @@
     "p": "events",
     "b": false,
     "f": "plugin.go",
-    "l": 265
+    "l": 265,
+    "g": [
+      "事件",
+      "订阅"
+    ]
   },
   {
     "n": "EventAgentLLMChain",
@@ -294,7 +366,11 @@
     "p": "constants",
     "b": false,
     "f": "plugin.go",
-    "l": 252
+    "l": 252,
+    "g": [
+      "事件",
+      "订阅"
+    ]
   },
   {
     "n": "EventAgentOutput",
@@ -305,7 +381,11 @@
     "p": "constants",
     "b": false,
     "f": "plugin.go",
-    "l": 251
+    "l": 251,
+    "g": [
+      "事件",
+      "订阅"
+    ]
   },
   {
     "n": "EventContentDelta",
@@ -316,7 +396,11 @@
     "p": "constants",
     "b": false,
     "f": "plugin.go",
-    "l": 261
+    "l": 261,
+    "g": [
+      "事件",
+      "订阅"
+    ]
   },
   {
     "n": "EventHandler",
@@ -327,7 +411,11 @@
     "p": "events",
     "b": false,
     "f": "plugin.go",
-    "l": 273
+    "l": 273,
+    "g": [
+      "事件",
+      "订阅"
+    ]
   },
   {
     "n": "EventRawInput",
@@ -338,7 +426,11 @@
     "p": "constants",
     "b": false,
     "f": "plugin.go",
-    "l": 250
+    "l": 250,
+    "g": [
+      "事件",
+      "订阅"
+    ]
   },
   {
     "n": "EventReasoning",
@@ -349,7 +441,11 @@
     "p": "constants",
     "b": false,
     "f": "plugin.go",
-    "l": 254
+    "l": 254,
+    "g": [
+      "事件",
+      "订阅"
+    ]
   },
   {
     "n": "EventReasoningDelta",
@@ -360,7 +456,11 @@
     "p": "constants",
     "b": false,
     "f": "plugin.go",
-    "l": 260
+    "l": 260,
+    "g": [
+      "事件",
+      "订阅"
+    ]
   },
   {
     "n": "EventStage",
@@ -371,18 +471,13 @@
     "p": "constants",
     "b": false,
     "f": "plugin.go",
-    "l": 255
-  },
-  {
-    "n": "EventSubscriber",
-    "s": "type EventSubscriber interface { Subscribe(eventType EventType, handler EventHandler) func() }",
-    "d": "EventSubscriber allows plugins to subscribe to kernel events.",
-    "k": "type",
-    "r": "",
-    "p": "events",
-    "b": false,
-    "f": "plugin.go",
-    "l": 278
+    "l": 255,
+    "g": [
+      "事件",
+      "订阅",
+      "阶段",
+      "钩子"
+    ]
   },
   {
     "n": "EventSubscriber",
@@ -404,7 +499,11 @@
     "p": "constants",
     "b": false,
     "f": "plugin.go",
-    "l": 256
+    "l": 256,
+    "g": [
+      "事件",
+      "订阅"
+    ]
   },
   {
     "n": "EventToolCall",
@@ -415,7 +514,12 @@
     "p": "constants",
     "b": false,
     "f": "plugin.go",
-    "l": 253
+    "l": 253,
+    "g": [
+      "事件",
+      "订阅",
+      "工具"
+    ]
   },
   {
     "n": "EventType",
@@ -426,7 +530,11 @@
     "p": "events",
     "b": false,
     "f": "plugin.go",
-    "l": 247
+    "l": 247,
+    "g": [
+      "事件",
+      "订阅"
+    ]
   },
   {
     "n": "Events",
@@ -437,7 +545,13 @@
     "p": "events",
     "b": true,
     "f": "plugin.go",
-    "l": 446
+    "l": 446,
+    "g": [
+      "事件",
+      "订阅",
+      "事件订阅",
+      "监听事件"
+    ]
   },
   {
     "n": "Get",
@@ -448,7 +562,10 @@
     "p": "settings",
     "b": false,
     "f": "settings.go",
-    "l": 5
+    "l": 5,
+    "g": [
+      "读取配置"
+    ]
   },
   {
     "n": "GetCore",
@@ -459,7 +576,10 @@
     "p": "settings",
     "b": false,
     "f": "settings.go",
-    "l": 14
+    "l": 14,
+    "g": [
+      "读核心配置"
+    ]
   },
   {
     "n": "GetNetwork",
@@ -470,7 +590,10 @@
     "p": "memory",
     "b": false,
     "f": "memory.go",
-    "l": 104
+    "l": 104,
+    "g": [
+      "查关系网"
+    ]
   },
   {
     "n": "GetPerson",
@@ -481,7 +604,10 @@
     "p": "memory",
     "b": false,
     "f": "memory.go",
-    "l": 101
+    "l": 101,
+    "g": [
+      "查人物"
+    ]
   },
   {
     "n": "GetPlugin",
@@ -492,7 +618,10 @@
     "p": "settings",
     "b": false,
     "f": "settings.go",
-    "l": 28
+    "l": 28,
+    "g": [
+      "读插件配置"
+    ]
   },
   {
     "n": "GetRelations",
@@ -503,7 +632,10 @@
     "p": "memory",
     "b": false,
     "f": "memory.go",
-    "l": 103
+    "l": 103,
+    "g": [
+      "查关系"
+    ]
   },
   {
     "n": "GetTrait",
@@ -514,18 +646,10 @@
     "p": "memory",
     "b": false,
     "f": "memory.go",
-    "l": 102
-  },
-  {
-    "n": "IOInjector",
-    "s": "type IOInjector interface { InjectInterruptText(source, channel, text string) InjectText(source, channel, text string) InjectTextNoMemory(source, channel, text string) // I …",
-    "d": "IOInjector provides methods for injecting input and interrupts into the agent pipeline.",
-    "k": "type",
-    "r": "",
-    "p": "channels",
-    "b": false,
-    "f": "plugin.go",
-    "l": 220
+    "l": 102,
+    "g": [
+      "查特征"
+    ]
   },
   {
     "n": "IOInjector",
@@ -558,7 +682,15 @@
     "p": "channels",
     "b": false,
     "f": "plugin.go",
-    "l": 701
+    "l": 701,
+    "g": [
+      "注入输入",
+      "投喂输入",
+      "模拟用户输入",
+      "媒体",
+      "图片",
+      "音频"
+    ]
   },
   {
     "n": "InjectInputMedia",
@@ -569,7 +701,15 @@
     "p": "channels",
     "b": false,
     "f": "plugin.go",
-    "l": 230
+    "l": 230,
+    "g": [
+      "注入输入",
+      "投喂输入",
+      "模拟用户输入",
+      "媒体",
+      "图片",
+      "音频"
+    ]
   },
   {
     "n": "InjectInputMediaOpts",
@@ -580,7 +720,15 @@
     "p": "channels",
     "b": false,
     "f": "plugin.go",
-    "l": 740
+    "l": 740,
+    "g": [
+      "注入输入",
+      "投喂输入",
+      "模拟用户输入",
+      "媒体",
+      "图片",
+      "音频"
+    ]
   },
   {
     "n": "InjectInputMediaOpts",
@@ -591,7 +739,15 @@
     "p": "channels",
     "b": false,
     "f": "plugin.go",
-    "l": 241
+    "l": 241,
+    "g": [
+      "注入输入",
+      "投喂输入",
+      "模拟用户输入",
+      "媒体",
+      "图片",
+      "音频"
+    ]
   },
   {
     "n": "InjectInputMediaSync",
@@ -602,7 +758,15 @@
     "p": "channels",
     "b": false,
     "f": "plugin.go",
-    "l": 231
+    "l": 231,
+    "g": [
+      "注入输入",
+      "投喂输入",
+      "模拟用户输入",
+      "媒体",
+      "图片",
+      "音频"
+    ]
   },
   {
     "n": "InjectInputMediaSync",
@@ -613,18 +777,15 @@
     "p": "channels",
     "b": false,
     "f": "plugin.go",
-    "l": 707
-  },
-  {
-    "n": "InjectInputMediaSyncOpts",
-    "s": "InjectInputMediaSyncOpts(source, channel, text string, blocks []ContentBlock, opts InjectOptions) string",
-    "d": "",
-    "k": "method",
-    "r": "IOInjector",
-    "p": "channels",
-    "b": false,
-    "f": "plugin.go",
-    "l": 242
+    "l": 707,
+    "g": [
+      "注入输入",
+      "投喂输入",
+      "模拟用户输入",
+      "媒体",
+      "图片",
+      "音频"
+    ]
   },
   {
     "n": "InjectInputMediaSyncOpts",
@@ -635,7 +796,34 @@
     "p": "channels",
     "b": false,
     "f": "plugin.go",
-    "l": 747
+    "l": 747,
+    "g": [
+      "注入输入",
+      "投喂输入",
+      "模拟用户输入",
+      "媒体",
+      "图片",
+      "音频"
+    ]
+  },
+  {
+    "n": "InjectInputMediaSyncOpts",
+    "s": "InjectInputMediaSyncOpts(source, channel, text string, blocks []ContentBlock, opts InjectOptions) string",
+    "d": "",
+    "k": "method",
+    "r": "IOInjector",
+    "p": "channels",
+    "b": false,
+    "f": "plugin.go",
+    "l": 242,
+    "g": [
+      "注入输入",
+      "投喂输入",
+      "模拟用户输入",
+      "媒体",
+      "图片",
+      "音频"
+    ]
   },
   {
     "n": "InjectInputSync",
@@ -646,7 +834,12 @@
     "p": "channels",
     "b": false,
     "f": "plugin.go",
-    "l": 226
+    "l": 226,
+    "g": [
+      "注入输入",
+      "投喂输入",
+      "模拟用户输入"
+    ]
   },
   {
     "n": "InjectInputSync",
@@ -657,7 +850,12 @@
     "p": "channels",
     "b": false,
     "f": "plugin.go",
-    "l": 692
+    "l": 692,
+    "g": [
+      "注入输入",
+      "投喂输入",
+      "模拟用户输入"
+    ]
   },
   {
     "n": "InjectInputSyncOpts",
@@ -668,7 +866,12 @@
     "p": "channels",
     "b": false,
     "f": "plugin.go",
-    "l": 240
+    "l": 240,
+    "g": [
+      "注入输入",
+      "投喂输入",
+      "模拟用户输入"
+    ]
   },
   {
     "n": "InjectInputSyncOpts",
@@ -679,18 +882,12 @@
     "p": "channels",
     "b": false,
     "f": "plugin.go",
-    "l": 731
-  },
-  {
-    "n": "InjectInterruptMedia",
-    "s": "func (s *PluginSDK) InjectInterruptMedia(source, channel, text string, blocks []ContentBlock)",
-    "d": "InjectInterruptMedia 注入带媒体内容块的中断，可抢占当前 LLM 处理。",
-    "k": "method",
-    "r": "PluginSDK",
-    "p": "channels",
-    "b": false,
-    "f": "plugin.go",
-    "l": 764
+    "l": 731,
+    "g": [
+      "注入输入",
+      "投喂输入",
+      "模拟用户输入"
+    ]
   },
   {
     "n": "InjectInterruptMedia",
@@ -701,7 +898,36 @@
     "p": "channels",
     "b": false,
     "f": "plugin.go",
-    "l": 232
+    "l": 232,
+    "g": [
+      "中断注入",
+      "插话",
+      "打断",
+      "抢占",
+      "媒体",
+      "图片",
+      "音频"
+    ]
+  },
+  {
+    "n": "InjectInterruptMedia",
+    "s": "func (s *PluginSDK) InjectInterruptMedia(source, channel, text string, blocks []ContentBlock)",
+    "d": "InjectInterruptMedia 注入带媒体内容块的中断，可抢占当前 LLM 处理。",
+    "k": "method",
+    "r": "PluginSDK",
+    "p": "channels",
+    "b": false,
+    "f": "plugin.go",
+    "l": 764,
+    "g": [
+      "中断注入",
+      "插话",
+      "打断",
+      "抢占",
+      "媒体",
+      "图片",
+      "音频"
+    ]
   },
   {
     "n": "InjectInterruptMediaOpts",
@@ -712,7 +938,16 @@
     "p": "channels",
     "b": false,
     "f": "plugin.go",
-    "l": 756
+    "l": 756,
+    "g": [
+      "中断注入",
+      "插话",
+      "打断",
+      "抢占",
+      "媒体",
+      "图片",
+      "音频"
+    ]
   },
   {
     "n": "InjectInterruptMediaOpts",
@@ -723,18 +958,16 @@
     "p": "channels",
     "b": false,
     "f": "plugin.go",
-    "l": 243
-  },
-  {
-    "n": "InjectInterruptText",
-    "s": "InjectInterruptText(source, channel, text string)",
-    "d": "",
-    "k": "method",
-    "r": "IOInjector",
-    "p": "channels",
-    "b": false,
-    "f": "plugin.go",
-    "l": 221
+    "l": 243,
+    "g": [
+      "中断注入",
+      "插话",
+      "打断",
+      "抢占",
+      "媒体",
+      "图片",
+      "音频"
+    ]
   },
   {
     "n": "InjectInterruptText",
@@ -745,18 +978,30 @@
     "p": "channels",
     "b": false,
     "f": "plugin.go",
-    "l": 673
+    "l": 673,
+    "g": [
+      "中断注入",
+      "插话",
+      "打断",
+      "抢占"
+    ]
   },
   {
-    "n": "InjectInterruptTextOpts",
-    "s": "func (s *PluginSDK) InjectInterruptTextOpts(source, channel, text string, opts InjectOptions)",
-    "d": "InjectInterruptTextOpts 注入可抢占当前处理的中断文本。",
+    "n": "InjectInterruptText",
+    "s": "InjectInterruptText(source, channel, text string)",
+    "d": "",
     "k": "method",
-    "r": "PluginSDK",
+    "r": "IOInjector",
     "p": "channels",
     "b": false,
     "f": "plugin.go",
-    "l": 724
+    "l": 221,
+    "g": [
+      "中断注入",
+      "插话",
+      "打断",
+      "抢占"
+    ]
   },
   {
     "n": "InjectInterruptTextOpts",
@@ -767,7 +1012,30 @@
     "p": "channels",
     "b": false,
     "f": "plugin.go",
-    "l": 239
+    "l": 239,
+    "g": [
+      "中断注入",
+      "插话",
+      "打断",
+      "抢占"
+    ]
+  },
+  {
+    "n": "InjectInterruptTextOpts",
+    "s": "func (s *PluginSDK) InjectInterruptTextOpts(source, channel, text string, opts InjectOptions)",
+    "d": "InjectInterruptTextOpts 注入可抢占当前处理的中断文本。",
+    "k": "method",
+    "r": "PluginSDK",
+    "p": "channels",
+    "b": false,
+    "f": "plugin.go",
+    "l": 724,
+    "g": [
+      "中断注入",
+      "插话",
+      "打断",
+      "抢占"
+    ]
   },
   {
     "n": "InjectOptions",
@@ -778,18 +1046,12 @@
     "p": "channels",
     "b": false,
     "f": "plugin.go",
-    "l": 98
-  },
-  {
-    "n": "InjectText",
-    "s": "func (s *PluginSDK) InjectText(source, channel, text string)",
-    "d": "InjectText injects a text message into the agent pipeline.",
-    "k": "method",
-    "r": "PluginSDK",
-    "p": "channels",
-    "b": false,
-    "f": "plugin.go",
-    "l": 679
+    "l": 98,
+    "g": [
+      "注入选项",
+      "是否记入记忆",
+      "是否裁剪上下文"
+    ]
   },
   {
     "n": "InjectText",
@@ -800,18 +1062,30 @@
     "p": "channels",
     "b": false,
     "f": "plugin.go",
-    "l": 222
+    "l": 222,
+    "g": [
+      "注入文本",
+      "注入消息",
+      "投喂输入",
+      "灌入内容"
+    ]
   },
   {
-    "n": "InjectTextNoMemory",
-    "s": "func (s *PluginSDK) InjectTextNoMemory(source, channel, text string)",
-    "d": "InjectTextNoMemory injects a text message without generating memory.",
+    "n": "InjectText",
+    "s": "func (s *PluginSDK) InjectText(source, channel, text string)",
+    "d": "InjectText injects a text message into the agent pipeline.",
     "k": "method",
     "r": "PluginSDK",
     "p": "channels",
     "b": false,
     "f": "plugin.go",
-    "l": 685
+    "l": 679,
+    "g": [
+      "注入文本",
+      "注入消息",
+      "投喂输入",
+      "灌入内容"
+    ]
   },
   {
     "n": "InjectTextNoMemory",
@@ -822,18 +1096,34 @@
     "p": "channels",
     "b": false,
     "f": "plugin.go",
-    "l": 223
+    "l": 223,
+    "g": [
+      "注入文本",
+      "注入消息",
+      "投喂输入",
+      "灌入内容",
+      "记忆",
+      "内存"
+    ]
   },
   {
-    "n": "InjectTextOpts",
-    "s": "func (s *PluginSDK) InjectTextOpts(source, channel, text string, opts InjectOptions)",
-    "d": "InjectTextOpts 注入文本到 agent，并在这一次注入上声明记忆与裁剪行为。",
+    "n": "InjectTextNoMemory",
+    "s": "func (s *PluginSDK) InjectTextNoMemory(source, channel, text string)",
+    "d": "InjectTextNoMemory injects a text message without generating memory.",
     "k": "method",
     "r": "PluginSDK",
     "p": "channels",
     "b": false,
     "f": "plugin.go",
-    "l": 714
+    "l": 685,
+    "g": [
+      "注入文本",
+      "注入消息",
+      "投喂输入",
+      "灌入内容",
+      "记忆",
+      "内存"
+    ]
   },
   {
     "n": "InjectTextOpts",
@@ -844,7 +1134,30 @@
     "p": "channels",
     "b": false,
     "f": "plugin.go",
-    "l": 238
+    "l": 238,
+    "g": [
+      "注入文本",
+      "注入消息",
+      "投喂输入",
+      "灌入内容"
+    ]
+  },
+  {
+    "n": "InjectTextOpts",
+    "s": "func (s *PluginSDK) InjectTextOpts(source, channel, text string, opts InjectOptions)",
+    "d": "InjectTextOpts 注入文本到 agent，并在这一次注入上声明记忆与裁剪行为。",
+    "k": "method",
+    "r": "PluginSDK",
+    "p": "channels",
+    "b": false,
+    "f": "plugin.go",
+    "l": 714,
+    "g": [
+      "注入文本",
+      "注入消息",
+      "投喂输入",
+      "灌入内容"
+    ]
   },
   {
     "n": "InputChannelRegistrar",
@@ -855,7 +1168,11 @@
     "p": "bridge",
     "b": false,
     "f": "plugin.go",
-    "l": 314
+    "l": 314,
+    "g": [
+      "通道",
+      "频道"
+    ]
   },
   {
     "n": "Insert",
@@ -866,7 +1183,10 @@
     "p": "memory",
     "b": false,
     "f": "memory.go",
-    "l": 76
+    "l": 76,
+    "g": [
+      "插入文档"
+    ]
   },
   {
     "n": "InsertWithMedia",
@@ -877,7 +1197,13 @@
     "p": "memory",
     "b": false,
     "f": "memory.go",
-    "l": 81
+    "l": 81,
+    "g": [
+      "媒体",
+      "图片",
+      "音频",
+      "插入带媒体文档"
+    ]
   },
   {
     "n": "Introspect",
@@ -888,7 +1214,11 @@
     "p": "memory",
     "b": false,
     "f": "memory.go",
-    "l": 7
+    "l": 7,
+    "g": [
+      "查看记忆",
+      "记忆概览"
+    ]
   },
   {
     "n": "IsPluginDisabled",
@@ -899,7 +1229,10 @@
     "p": "lifecycle",
     "b": false,
     "f": "plugin.go",
-    "l": 290
+    "l": 290,
+    "g": [
+      "查插件是否被禁用"
+    ]
   },
   {
     "n": "IsResponded",
@@ -921,7 +1254,11 @@
     "p": "memory",
     "b": false,
     "f": "knowledge.go",
-    "l": 11
+    "l": 11,
+    "g": [
+      "知识库",
+      "知识"
+    ]
   },
   {
     "n": "Knowledge",
@@ -932,7 +1269,11 @@
     "p": "memory",
     "b": false,
     "f": "plugin.go",
-    "l": 425
+    "l": 425,
+    "g": [
+      "知识库",
+      "知识"
+    ]
   },
   {
     "n": "KnowledgeAPI",
@@ -946,17 +1287,6 @@
     "l": 0
   },
   {
-    "n": "KnowledgeAPI",
-    "s": "type KnowledgeAPI interface { Search(query string, topK int) ([]*Knowledge, error) Add(name, content string) error List() ([]string, error) }",
-    "d": "KnowledgeAPI provides access to the knowledge store.",
-    "k": "type",
-    "r": "",
-    "p": "memory",
-    "b": false,
-    "f": "knowledge.go",
-    "l": 4
-  },
-  {
     "n": "LLM",
     "s": "func (s *PluginSDK) LLM() LLMAPI",
     "d": "LLM returns the LLM provider API (may be nil if not available).",
@@ -966,17 +1296,6 @@
     "b": false,
     "f": "plugin.go",
     "l": 432
-  },
-  {
-    "n": "LLMAPI",
-    "s": "type LLMAPI interface { ListSources() []string SetSource(name string) error CurrentSource() string }",
-    "d": "LLMAPI provides access to the LLM provider manager.",
-    "k": "type",
-    "r": "",
-    "p": "llm",
-    "b": false,
-    "f": "llm.go",
-    "l": 4
   },
   {
     "n": "LLMAPI",
@@ -998,7 +1317,10 @@
     "p": "memory",
     "b": false,
     "f": "knowledge.go",
-    "l": 7
+    "l": 7,
+    "g": [
+      "列出"
+    ]
   },
   {
     "n": "List",
@@ -1009,7 +1331,10 @@
     "p": "settings",
     "b": false,
     "f": "settings.go",
-    "l": 11
+    "l": 11,
+    "g": [
+      "列出"
+    ]
   },
   {
     "n": "ListCore",
@@ -1020,7 +1345,10 @@
     "p": "settings",
     "b": false,
     "f": "settings.go",
-    "l": 20
+    "l": 20,
+    "g": [
+      "列出核心配置"
+    ]
   },
   {
     "n": "ListLoadedPlugins",
@@ -1031,7 +1359,10 @@
     "p": "lifecycle",
     "b": false,
     "f": "plugin.go",
-    "l": 288
+    "l": 288,
+    "g": [
+      "已加载插件列表"
+    ]
   },
   {
     "n": "ListPersons",
@@ -1042,7 +1373,10 @@
     "p": "memory",
     "b": false,
     "f": "memory.go",
-    "l": 105
+    "l": 105,
+    "g": [
+      "列出人物"
+    ]
   },
   {
     "n": "ListPlugin",
@@ -1053,7 +1387,10 @@
     "p": "settings",
     "b": false,
     "f": "settings.go",
-    "l": 34
+    "l": 34,
+    "g": [
+      "列出插件配置"
+    ]
   },
   {
     "n": "ListSources",
@@ -1064,7 +1401,10 @@
     "p": "llm",
     "b": false,
     "f": "llm.go",
-    "l": 5
+    "l": 5,
+    "g": [
+      "列出模型来源"
+    ]
   },
   {
     "n": "Lock",
@@ -1086,7 +1426,13 @@
     "p": "memory",
     "b": false,
     "f": "memory.go",
-    "l": 58
+    "l": 58,
+    "g": [
+      "媒体",
+      "图片",
+      "音频",
+      "媒体附件"
+    ]
   },
   {
     "n": "MemItem",
@@ -1108,7 +1454,11 @@
     "p": "memory",
     "b": false,
     "f": "plugin.go",
-    "l": 404
+    "l": 404,
+    "g": [
+      "记忆",
+      "内存"
+    ]
   },
   {
     "n": "MemoryAPI",
@@ -1122,17 +1472,6 @@
     "l": 0
   },
   {
-    "n": "MemoryAPI",
-    "s": "type MemoryAPI interface { Recall(query []string, depth int) ([]Entity, []Relation, error) Commit(triples []Triple) error Introspect() (map[string]interface{}, error) Merg …",
-    "d": "MemoryAPI provides access to the graph memory (entity-relation store).",
-    "k": "type",
-    "r": "",
-    "p": "memory",
-    "b": false,
-    "f": "memory.go",
-    "l": 4
-  },
-  {
     "n": "MergeEntities",
     "s": "MergeEntities(source, target string) (int, error)",
     "d": "",
@@ -1141,7 +1480,10 @@
     "p": "memory",
     "b": false,
     "f": "memory.go",
-    "l": 8
+    "l": 8,
+    "g": [
+      "合并实体"
+    ]
   },
   {
     "n": "Name",
@@ -1152,7 +1494,10 @@
     "p": "lifecycle",
     "b": false,
     "f": "plugin.go",
-    "l": 14
+    "l": 14,
+    "g": [
+      "名称"
+    ]
   },
   {
     "n": "OutputChannelRegistrar",
@@ -1163,7 +1508,11 @@
     "p": "bridge",
     "b": false,
     "f": "plugin.go",
-    "l": 317
+    "l": 317,
+    "g": [
+      "通道",
+      "频道"
+    ]
   },
   {
     "n": "OutputChannelUnregistrar",
@@ -1174,7 +1523,11 @@
     "p": "bridge",
     "b": false,
     "f": "plugin.go",
-    "l": 324
+    "l": 324,
+    "g": [
+      "通道",
+      "频道"
+    ]
   },
   {
     "n": "PersonProfile",
@@ -1185,18 +1538,10 @@
     "p": "memory",
     "b": false,
     "f": "memory.go",
-    "l": 109
-  },
-  {
-    "n": "Plugin",
-    "s": "type Plugin interface { Name() string Start(sdk *PluginSDK) error Stop() error }",
-    "d": "Plugin is the interface every plugin must implement.",
-    "k": "type",
-    "r": "",
-    "p": "lifecycle",
-    "b": false,
-    "f": "plugin.go",
-    "l": 13
+    "l": 109,
+    "g": [
+      "人物画像"
+    ]
   },
   {
     "n": "Plugin",
@@ -1218,18 +1563,13 @@
     "p": "lifecycle",
     "b": false,
     "f": "plugin.go",
-    "l": 653
-  },
-  {
-    "n": "PluginMgrAPI",
-    "s": "type PluginMgrAPI interface { // ReloadOne 重载单个插件（停止后重新加载）。 ReloadOne(name string) error // ListLoadedPlugins 列出已加载插件。 ListLoa …",
-    "d": "PluginMgrAPI 提供插件管理能力（外部插件可调用）。",
-    "k": "type",
-    "r": "",
-    "p": "lifecycle",
-    "b": false,
-    "f": "plugin.go",
-    "l": 284
+    "l": 653,
+    "g": [
+      "插件管理",
+      "重载插件",
+      "禁用插件",
+      "插件管理器"
+    ]
   },
   {
     "n": "PluginMgrAPI",
@@ -1251,7 +1591,10 @@
     "p": "lifecycle",
     "b": false,
     "f": "plugin.go",
-    "l": 397
+    "l": 397,
+    "g": [
+      "插件名"
+    ]
   },
   {
     "n": "PluginSDK",
@@ -1273,7 +1616,10 @@
     "p": "settings",
     "b": false,
     "f": "settings.go",
-    "l": 46
+    "l": 46,
+    "g": [
+      "插件配置"
+    ]
   },
   {
     "n": "PriorityL1",
@@ -1284,7 +1630,11 @@
     "p": "channels",
     "b": false,
     "f": "plugin.go",
-    "l": 123
+    "l": 123,
+    "g": [
+      "优先级",
+      "中断级别"
+    ]
   },
   {
     "n": "PriorityL2",
@@ -1295,7 +1645,11 @@
     "p": "channels",
     "b": false,
     "f": "plugin.go",
-    "l": 124
+    "l": 124,
+    "g": [
+      "优先级",
+      "中断级别"
+    ]
   },
   {
     "n": "PriorityL3",
@@ -1306,7 +1660,11 @@
     "p": "channels",
     "b": false,
     "f": "plugin.go",
-    "l": 125
+    "l": 125,
+    "g": [
+      "优先级",
+      "中断级别"
+    ]
   },
   {
     "n": "PriorityL4",
@@ -1317,7 +1675,11 @@
     "p": "channels",
     "b": true,
     "f": "plugin.go",
-    "l": 127
+    "l": 127,
+    "g": [
+      "优先级",
+      "中断级别"
+    ]
   },
   {
     "n": "Purge",
@@ -1328,7 +1690,12 @@
     "p": "memory",
     "b": false,
     "f": "memory.go",
-    "l": 9
+    "l": 9,
+    "g": [
+      "清除",
+      "删除记忆",
+      "清除记忆"
+    ]
   },
   {
     "n": "Query",
@@ -1339,7 +1706,10 @@
     "p": "memory",
     "b": false,
     "f": "memory.go",
-    "l": 75
+    "l": 75,
+    "g": [
+      "查询文档"
+    ]
   },
   {
     "n": "RLock",
@@ -1372,7 +1742,13 @@
     "p": "memory",
     "b": false,
     "f": "memory.go",
-    "l": 5
+    "l": 5,
+    "g": [
+      "召回",
+      "检索记忆",
+      "召回记忆",
+      "查记忆"
+    ]
   },
   {
     "n": "RecallPolicyAuto",
@@ -1383,7 +1759,14 @@
     "p": "channels",
     "b": false,
     "f": "plugin.go",
-    "l": 65
+    "l": 65,
+    "g": [
+      "策略",
+      "召回",
+      "检索记忆",
+      "自动召回",
+      "默认召回"
+    ]
   },
   {
     "n": "RecallPolicyNone",
@@ -1394,7 +1777,14 @@
     "p": "channels",
     "b": false,
     "f": "plugin.go",
-    "l": 64
+    "l": 64,
+    "g": [
+      "策略",
+      "召回",
+      "检索记忆",
+      "不召回",
+      "关闭召回"
+    ]
   },
   {
     "n": "RegisterDef",
@@ -1405,7 +1795,12 @@
     "p": "settings",
     "b": false,
     "f": "settings.go",
-    "l": 37
+    "l": 37,
+    "g": [
+      "注册配置项",
+      "声明配置",
+      "配置定义"
+    ]
   },
   {
     "n": "RegisterInputChannel",
@@ -1416,7 +1811,15 @@
     "p": "channels",
     "b": false,
     "f": "plugin.go",
-    "l": 561
+    "l": 561,
+    "g": [
+      "注册输入通道",
+      "收消息",
+      "接收消息",
+      "外部消息源",
+      "通道",
+      "频道"
+    ]
   },
   {
     "n": "RegisterOnRemoveHandler",
@@ -1427,7 +1830,13 @@
     "p": "lifecycle",
     "b": false,
     "f": "plugin.go",
-    "l": 826
+    "l": 826,
+    "g": [
+      "卸载回调",
+      "删除清理",
+      "插件卸载",
+      "onRemove"
+    ]
   },
   {
     "n": "RegisterOutputChannel",
@@ -1438,7 +1847,15 @@
     "p": "channels",
     "b": false,
     "f": "plugin.go",
-    "l": 528
+    "l": 528,
+    "g": [
+      "注册输出通道",
+      "发消息",
+      "投递消息",
+      "输出目的地",
+      "通道",
+      "频道"
+    ]
   },
   {
     "n": "RegisterPluginAPI",
@@ -1449,7 +1866,11 @@
     "p": "lifecycle",
     "b": false,
     "f": "plugin.go",
-    "l": 502
+    "l": 502,
+    "g": [
+      "注册插件接口",
+      "暴露接口"
+    ]
   },
   {
     "n": "RegisterStage",
@@ -1460,7 +1881,16 @@
     "p": "stages",
     "b": false,
     "f": "plugin.go",
-    "l": 467
+    "l": 467,
+    "g": [
+      "注册阶段",
+      "阶段钩子",
+      "挂钩子",
+      "干预流程",
+      "管道钩子",
+      "阶段",
+      "钩子"
+    ]
   },
   {
     "n": "RegisterStopHandler",
@@ -1471,7 +1901,12 @@
     "p": "lifecycle",
     "b": false,
     "f": "plugin.go",
-    "l": 801
+    "l": 801,
+    "g": [
+      "停止回调",
+      "关闭清理",
+      "插件停止"
+    ]
   },
   {
     "n": "RegisterTool",
@@ -1482,7 +1917,18 @@
     "p": "tools",
     "b": false,
     "f": "plugin.go",
-    "l": 453
+    "l": 453,
+    "g": [
+      "注册工具",
+      "添加工具",
+      "暴露工具",
+      "工具定义",
+      "让模型调用",
+      "工具",
+      "怎么注册工具",
+      "工具怎么加",
+      "自定义工具"
+    ]
   },
   {
     "n": "Relation",
@@ -1493,7 +1939,11 @@
     "p": "memory",
     "b": false,
     "f": "memory.go",
-    "l": 20
+    "l": 20,
+    "g": [
+      "关系",
+      "三元组关系"
+    ]
   },
   {
     "n": "ReloadOne",
@@ -1504,7 +1954,10 @@
     "p": "lifecycle",
     "b": false,
     "f": "plugin.go",
-    "l": 286
+    "l": 286,
+    "g": [
+      "重载单个插件"
+    ]
   },
   {
     "n": "Remove",
@@ -1515,7 +1968,10 @@
     "p": "memory",
     "b": false,
     "f": "memory.go",
-    "l": 82
+    "l": 82,
+    "g": [
+      "删除文档"
+    ]
   },
   {
     "n": "RunOnRemoveHandlers",
@@ -1548,7 +2004,10 @@
     "p": "misc",
     "b": false,
     "f": "plugin.go",
-    "l": 10
+    "l": 10,
+    "g": [
+      "SDK 版本"
+    ]
   },
   {
     "n": "Search",
@@ -1559,7 +2018,10 @@
     "p": "memory",
     "b": false,
     "f": "knowledge.go",
-    "l": 5
+    "l": 5,
+    "g": [
+      "搜索知识"
+    ]
   },
   {
     "n": "Set",
@@ -1570,7 +2032,12 @@
     "p": "settings",
     "b": false,
     "f": "settings.go",
-    "l": 8
+    "l": 8,
+    "g": [
+      "设置",
+      "装配",
+      "写入配置"
+    ]
   },
   {
     "n": "SetAutoRestart",
@@ -1581,7 +2048,16 @@
     "p": "lifecycle",
     "b": false,
     "f": "plugin.go",
-    "l": 784
+    "l": 784,
+    "g": [
+      "设置",
+      "装配",
+      "自动重启",
+      "崩溃自愈",
+      "故障恢复",
+      "崩溃后重启",
+      "是否自动重启"
+    ]
   },
   {
     "n": "SetCore",
@@ -1592,7 +2068,12 @@
     "p": "settings",
     "b": false,
     "f": "settings.go",
-    "l": 17
+    "l": 17,
+    "g": [
+      "设置",
+      "装配",
+      "写核心配置"
+    ]
   },
   {
     "n": "SetDocMemoryAPI",
@@ -1603,7 +2084,14 @@
     "p": "bridge",
     "b": false,
     "f": "plugin.go",
-    "l": 614
+    "l": 614,
+    "g": [
+      "设置",
+      "装配",
+      "记忆",
+      "内存",
+      "文档"
+    ]
   },
   {
     "n": "SetEventSubscriber",
@@ -1614,7 +2102,13 @@
     "p": "bridge",
     "b": true,
     "f": "plugin.go",
-    "l": 638
+    "l": 638,
+    "g": [
+      "设置",
+      "装配",
+      "事件",
+      "订阅"
+    ]
   },
   {
     "n": "SetIOInjector",
@@ -1625,7 +2119,11 @@
     "p": "bridge",
     "b": false,
     "f": "plugin.go",
-    "l": 595
+    "l": 595,
+    "g": [
+      "设置",
+      "装配"
+    ]
   },
   {
     "n": "SetInputChannelRegistrar",
@@ -1636,7 +2134,13 @@
     "p": "bridge",
     "b": false,
     "f": "plugin.go",
-    "l": 588
+    "l": 588,
+    "g": [
+      "设置",
+      "装配",
+      "通道",
+      "频道"
+    ]
   },
   {
     "n": "SetKnowledgeAPI",
@@ -1647,7 +2151,13 @@
     "p": "bridge",
     "b": false,
     "f": "plugin.go",
-    "l": 620
+    "l": 620,
+    "g": [
+      "设置",
+      "装配",
+      "知识库",
+      "知识"
+    ]
   },
   {
     "n": "SetLLMAPI",
@@ -1658,7 +2168,11 @@
     "p": "bridge",
     "b": false,
     "f": "plugin.go",
-    "l": 626
+    "l": 626,
+    "g": [
+      "设置",
+      "装配"
+    ]
   },
   {
     "n": "SetMemoryAPI",
@@ -1669,7 +2183,13 @@
     "p": "bridge",
     "b": false,
     "f": "plugin.go",
-    "l": 602
+    "l": 602,
+    "g": [
+      "设置",
+      "装配",
+      "记忆",
+      "内存"
+    ]
   },
   {
     "n": "SetOutputChannelRegistrar",
@@ -1680,7 +2200,13 @@
     "p": "bridge",
     "b": false,
     "f": "plugin.go",
-    "l": 574
+    "l": 574,
+    "g": [
+      "设置",
+      "装配",
+      "通道",
+      "频道"
+    ]
   },
   {
     "n": "SetOutputChannelUnregistrar",
@@ -1691,7 +2217,13 @@
     "p": "bridge",
     "b": true,
     "f": "plugin.go",
-    "l": 581
+    "l": 581,
+    "g": [
+      "设置",
+      "装配",
+      "通道",
+      "频道"
+    ]
   },
   {
     "n": "SetPlugin",
@@ -1702,7 +2234,12 @@
     "p": "settings",
     "b": false,
     "f": "settings.go",
-    "l": 31
+    "l": 31,
+    "g": [
+      "设置",
+      "装配",
+      "写插件配置"
+    ]
   },
   {
     "n": "SetPluginMgrAPI",
@@ -1713,7 +2250,14 @@
     "p": "bridge",
     "b": false,
     "f": "plugin.go",
-    "l": 645
+    "l": 645,
+    "g": [
+      "设置",
+      "装配",
+      "插件管理",
+      "重载插件",
+      "禁用插件"
+    ]
   },
   {
     "n": "SetSocialAPI",
@@ -1724,7 +2268,14 @@
     "p": "bridge",
     "b": false,
     "f": "plugin.go",
-    "l": 632
+    "l": 632,
+    "g": [
+      "设置",
+      "装配",
+      "社交",
+      "关系",
+      "联系人"
+    ]
   },
   {
     "n": "SetSource",
@@ -1735,7 +2286,12 @@
     "p": "llm",
     "b": false,
     "f": "llm.go",
-    "l": 6
+    "l": 6,
+    "g": [
+      "设置",
+      "装配",
+      "切换模型"
+    ]
   },
   {
     "n": "SetTextMemoryAPI",
@@ -1746,18 +2302,13 @@
     "p": "bridge",
     "b": false,
     "f": "plugin.go",
-    "l": 608
-  },
-  {
-    "n": "SetToolBlocks",
-    "s": "SetToolBlocks(blocks []ContentBlock)",
-    "d": "SetToolBlocks 插件工具注入多模态内容块（image_url/audio_url），内核在下一条",
-    "k": "method",
-    "r": "IOInjector",
-    "p": "channels",
-    "b": false,
-    "f": "plugin.go",
-    "l": 229
+    "l": 608,
+    "g": [
+      "设置",
+      "装配",
+      "记忆",
+      "内存"
+    ]
   },
   {
     "n": "SetToolBlocks",
@@ -1768,7 +2319,34 @@
     "p": "channels",
     "b": false,
     "f": "plugin.go",
-    "l": 772
+    "l": 772,
+    "g": [
+      "设置",
+      "装配",
+      "工具",
+      "工具返回图片",
+      "多模态返回",
+      "让模型看图"
+    ]
+  },
+  {
+    "n": "SetToolBlocks",
+    "s": "SetToolBlocks(blocks []ContentBlock)",
+    "d": "SetToolBlocks 插件工具注入多模态内容块（image_url/audio_url），内核在下一条",
+    "k": "method",
+    "r": "IOInjector",
+    "p": "channels",
+    "b": false,
+    "f": "plugin.go",
+    "l": 229,
+    "g": [
+      "设置",
+      "装配",
+      "工具",
+      "工具返回图片",
+      "多模态返回",
+      "让模型看图"
+    ]
   },
   {
     "n": "Settings",
@@ -1779,7 +2357,11 @@
     "p": "settings",
     "b": false,
     "f": "plugin.go",
-    "l": 401
+    "l": 401,
+    "g": [
+      "设置",
+      "装配"
+    ]
   },
   {
     "n": "SettingsAPI",
@@ -1793,17 +2375,6 @@
     "l": 0
   },
   {
-    "n": "SettingsAPI",
-    "s": "type SettingsAPI interface { // Get reads the plugin's own config value (config_\u003cname\u003e table). Get(key string) (interface{}, error) // Set writes a config value to the plugi …",
-    "d": "",
-    "k": "type",
-    "r": "",
-    "p": "settings",
-    "b": false,
-    "f": "settings.go",
-    "l": 3
-  },
-  {
     "n": "Social",
     "s": "func (s *PluginSDK) Social() SocialAPI",
     "d": "Social returns the social graph API (may be nil if not available).",
@@ -1812,18 +2383,12 @@
     "p": "memory",
     "b": false,
     "f": "plugin.go",
-    "l": 439
-  },
-  {
-    "n": "SocialAPI",
-    "s": "type SocialAPI interface { GetPerson(name string) (*PersonProfile, error) GetTrait(name, trait string) (string, bool) GetRelations(name string) ([]SocialRelation, error) G …",
-    "d": "SocialAPI provides read-only access to the social graph (person profiles and relationships).",
-    "k": "type",
-    "r": "",
-    "p": "memory",
-    "b": false,
-    "f": "memory.go",
-    "l": 100
+    "l": 439,
+    "g": [
+      "社交",
+      "关系",
+      "联系人"
+    ]
   },
   {
     "n": "SocialAPI",
@@ -1845,7 +2410,13 @@
     "p": "memory",
     "b": false,
     "f": "memory.go",
-    "l": 116
+    "l": 116,
+    "g": [
+      "社交",
+      "关系",
+      "联系人",
+      "社交关系"
+    ]
   },
   {
     "n": "Stage",
@@ -1856,7 +2427,13 @@
     "p": "stages",
     "b": false,
     "f": "plugin.go",
-    "l": 26
+    "l": 26,
+    "g": [
+      "阶段",
+      "钩子",
+      "阶段名",
+      "管线阶段"
+    ]
   },
   {
     "n": "StageAfterOutput",
@@ -1867,7 +2444,11 @@
     "p": "constants",
     "b": false,
     "f": "plugin.go",
-    "l": 35
+    "l": 35,
+    "g": [
+      "阶段",
+      "钩子"
+    ]
   },
   {
     "n": "StageAfterToolcall",
@@ -1878,7 +2459,12 @@
     "p": "constants",
     "b": false,
     "f": "plugin.go",
-    "l": 33
+    "l": 33,
+    "g": [
+      "阶段",
+      "钩子",
+      "工具"
+    ]
   },
   {
     "n": "StageBeforeOutput",
@@ -1889,7 +2475,11 @@
     "p": "constants",
     "b": false,
     "f": "plugin.go",
-    "l": 34
+    "l": 34,
+    "g": [
+      "阶段",
+      "钩子"
+    ]
   },
   {
     "n": "StageBeforeToolcall",
@@ -1900,7 +2490,12 @@
     "p": "constants",
     "b": false,
     "f": "plugin.go",
-    "l": 32
+    "l": 32,
+    "g": [
+      "阶段",
+      "钩子",
+      "工具"
+    ]
   },
   {
     "n": "StageContext",
@@ -1911,7 +2506,13 @@
     "p": "stages",
     "b": false,
     "f": "plugin.go",
-    "l": 148
+    "l": 148,
+    "g": [
+      "阶段",
+      "钩子",
+      "阶段上下文",
+      "读写消息"
+    ]
   },
   {
     "n": "StageHandler",
@@ -1922,7 +2523,12 @@
     "p": "stages",
     "b": false,
     "f": "plugin.go",
-    "l": 23
+    "l": 23,
+    "g": [
+      "阶段",
+      "钩子",
+      "阶段处理函数"
+    ]
   },
   {
     "n": "StageOnInput",
@@ -1933,7 +2539,11 @@
     "p": "constants",
     "b": false,
     "f": "plugin.go",
-    "l": 29
+    "l": 29,
+    "g": [
+      "阶段",
+      "钩子"
+    ]
   },
   {
     "n": "StagePostAction",
@@ -1944,7 +2554,11 @@
     "p": "constants",
     "b": false,
     "f": "plugin.go",
-    "l": 31
+    "l": 31,
+    "g": [
+      "阶段",
+      "钩子"
+    ]
   },
   {
     "n": "StagePreAction",
@@ -1955,7 +2569,11 @@
     "p": "constants",
     "b": false,
     "f": "plugin.go",
-    "l": 30
+    "l": 30,
+    "g": [
+      "阶段",
+      "钩子"
+    ]
   },
   {
     "n": "StageRegistrar",
@@ -1966,7 +2584,11 @@
     "p": "stages",
     "b": false,
     "f": "plugin.go",
-    "l": 308
+    "l": 308,
+    "g": [
+      "阶段",
+      "钩子"
+    ]
   },
   {
     "n": "StageScope",
@@ -1977,7 +2599,13 @@
     "p": "stages",
     "b": false,
     "f": "plugin.go",
-    "l": 294
+    "l": 294,
+    "g": [
+      "阶段",
+      "钩子",
+      "阶段作用域",
+      "只看自己的调用"
+    ]
   },
   {
     "n": "StageScopeGlobal",
@@ -1988,7 +2616,11 @@
     "p": "constants",
     "b": false,
     "f": "plugin.go",
-    "l": 298
+    "l": 298,
+    "g": [
+      "阶段",
+      "钩子"
+    ]
   },
   {
     "n": "StageScopeOwnTools",
@@ -1999,7 +2631,12 @@
     "p": "constants",
     "b": false,
     "f": "plugin.go",
-    "l": 301
+    "l": 301,
+    "g": [
+      "阶段",
+      "钩子",
+      "工具"
+    ]
   },
   {
     "n": "Start",
@@ -2010,7 +2647,10 @@
     "p": "lifecycle",
     "b": false,
     "f": "plugin.go",
-    "l": 15
+    "l": 15,
+    "g": [
+      "启动"
+    ]
   },
   {
     "n": "Stats",
@@ -2021,7 +2661,10 @@
     "p": "memory",
     "b": false,
     "f": "memory.go",
-    "l": 83
+    "l": 83,
+    "g": [
+      "统计"
+    ]
   },
   {
     "n": "Stop",
@@ -2032,7 +2675,11 @@
     "p": "lifecycle",
     "b": false,
     "f": "plugin.go",
-    "l": 16
+    "l": 16,
+    "g": [
+      "停止",
+      "关闭"
+    ]
   },
   {
     "n": "Subscribe",
@@ -2054,7 +2701,11 @@
     "p": "memory",
     "b": false,
     "f": "memory.go",
-    "l": 65
+    "l": 65,
+    "g": [
+      "事件",
+      "订阅"
+    ]
   },
   {
     "n": "TextMemory",
@@ -2065,18 +2716,11 @@
     "p": "memory",
     "b": false,
     "f": "plugin.go",
-    "l": 411
-  },
-  {
-    "n": "TextMemoryAPI",
-    "s": "type TextMemoryAPI interface { Append(evt TextEvent) error }",
-    "d": "TextMemoryAPI provides access to chronological text event storage.",
-    "k": "type",
-    "r": "",
-    "p": "memory",
-    "b": false,
-    "f": "memory.go",
-    "l": 43
+    "l": 411,
+    "g": [
+      "记忆",
+      "内存"
+    ]
   },
   {
     "n": "TextMemoryAPI",
@@ -2098,7 +2742,11 @@
     "p": "tools",
     "b": false,
     "f": "plugin.go",
-    "l": 186
+    "l": 186,
+    "g": [
+      "工具",
+      "工具调用"
+    ]
   },
   {
     "n": "ToolDef",
@@ -2109,7 +2757,13 @@
     "p": "tools",
     "b": false,
     "f": "plugin.go",
-    "l": 203
+    "l": 203,
+    "g": [
+      "工具",
+      "工具定义",
+      "工具描述",
+      "参数表"
+    ]
   },
   {
     "n": "ToolHandler",
@@ -2120,7 +2774,12 @@
     "p": "tools",
     "b": false,
     "f": "plugin.go",
-    "l": 20
+    "l": 20,
+    "g": [
+      "工具",
+      "工具实现",
+      "处理函数"
+    ]
   },
   {
     "n": "ToolRegistrar",
@@ -2131,7 +2790,10 @@
     "p": "bridge",
     "b": false,
     "f": "plugin.go",
-    "l": 305
+    "l": 305,
+    "g": [
+      "工具"
+    ]
   },
   {
     "n": "ToolResult",
@@ -2142,7 +2804,12 @@
     "p": "tools",
     "b": false,
     "f": "plugin.go",
-    "l": 194
+    "l": 194,
+    "g": [
+      "工具",
+      "工具结果",
+      "返回值"
+    ]
   },
   {
     "n": "Triple",
@@ -2153,7 +2820,10 @@
     "p": "memory",
     "b": false,
     "f": "memory.go",
-    "l": 31
+    "l": 31,
+    "g": [
+      "三元组"
+    ]
   },
   {
     "n": "Unlock",
@@ -2175,7 +2845,13 @@
     "p": "misc",
     "b": true,
     "f": "plugin.go",
-    "l": 539
+    "l": 539,
+    "g": [
+      "通道",
+      "频道",
+      "注销输出通道",
+      "删除通道"
+    ]
   },
   {
     "n": "ValidContextPolicy",
@@ -2186,7 +2862,11 @@
     "p": "channels",
     "b": false,
     "f": "plugin.go",
-    "l": 49
+    "l": 49,
+    "g": [
+      "策略",
+      "校验裁剪策略"
+    ]
   },
   {
     "n": "ValidRecallPolicy",
@@ -2197,6 +2877,12 @@
     "p": "channels",
     "b": false,
     "f": "plugin.go",
-    "l": 69
+    "l": 69,
+    "g": [
+      "策略",
+      "召回",
+      "检索记忆",
+      "校验召回策略"
+    ]
   }
 ]

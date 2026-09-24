@@ -238,16 +238,6 @@ DocMemory returns the document memory API (may be nil if not available).
 
 <small>`plugin.go:418`</small>
 
-### `DocMemoryAPI`
-
-```go
-type DocMemoryAPI interface { Query(text string, topK int) []*Doc Insert(doc *Doc) error // InsertWithMedia 写入文档并关联媒体。attachments 里带 Data 的会落进 …
-```
-
-DocMemoryAPI provides access to the document vector store.
-
-<small>`memory.go:74`</small>
-
 ### `Entity`
 
 ```go
@@ -257,22 +247,6 @@ type Entity struct { Name string `json:"name"` Type string `json:"type"` Mention
 Entity represents a named entity in the knowledge graph.
 
 <small>`memory.go:13`</small>
-
-### `PluginSDK.Knowledge`
-
-```go
-func (s *PluginSDK) Knowledge() KnowledgeAPI
-```
-
-Knowledge returns the knowledge store API (may be nil if not available).
-
-**示例插件里的真实用法**
-
-| 插件 | 位置 | 代码 |
-|---|---|---|
-| [`recoverydiag`](../examples/index.md#recoverydiag) | `example/recoverydiag/plugin.go:978` | `if p.sdk != nil && p.sdk.Knowledge() != nil {` |
-
-<small>`plugin.go:425`</small>
 
 ### `Knowledge`
 
@@ -290,15 +264,21 @@ Knowledge represents a knowledge entry.
 
 <small>`knowledge.go:11`</small>
 
-### `KnowledgeAPI`
+### `PluginSDK.Knowledge`
 
 ```go
-type KnowledgeAPI interface { Search(query string, topK int) ([]*Knowledge, error) Add(name, content string) error List() ([]string, error) }
+func (s *PluginSDK) Knowledge() KnowledgeAPI
 ```
 
-KnowledgeAPI provides access to the knowledge store.
+Knowledge returns the knowledge store API (may be nil if not available).
 
-<small>`knowledge.go:4`</small>
+**示例插件里的真实用法**
+
+| 插件 | 位置 | 代码 |
+|---|---|---|
+| [`recoverydiag`](../examples/index.md#recoverydiag) | `example/recoverydiag/plugin.go:978` | `if p.sdk != nil && p.sdk.Knowledge() != nil {` |
+
+<small>`plugin.go:425`</small>
 
 ### `MediaAttachment`
 
@@ -330,16 +310,6 @@ Memory returns the graph memory API (may be nil if not available).
 
 <small>`plugin.go:404`</small>
 
-### `MemoryAPI`
-
-```go
-type MemoryAPI interface { Recall(query []string, depth int) ([]Entity, []Relation, error) Commit(triples []Triple) error Introspect() (map[string]interface{}, error) Merg …
-```
-
-MemoryAPI provides access to the graph memory (entity-relation store).
-
-<small>`memory.go:4`</small>
-
 ### `PersonProfile`
 
 ```go
@@ -370,17 +340,6 @@ Social returns the social graph API (may be nil if not available).
 
 <small>`plugin.go:439`</small>
 
-### `SocialAPI`
-
-```go
-type SocialAPI interface { GetPerson(name string) (*PersonProfile, error) GetTrait(name, trait string) (string, bool) GetRelations(name string) ([]SocialRelation, error) G …
-```
-
-SocialAPI provides read-only access to the social graph (person profiles and relationships).
-External plugins can query person traits and social networks but cannot modify them.
-
-<small>`memory.go:100`</small>
-
 ### `SocialRelation`
 
 ```go
@@ -408,16 +367,6 @@ func (s *PluginSDK) TextMemory() TextMemoryAPI
 TextMemory returns the text memory API (may be nil if not available).
 
 <small>`plugin.go:411`</small>
-
-### `TextMemoryAPI`
-
-```go
-type TextMemoryAPI interface { Append(evt TextEvent) error }
-```
-
-TextMemoryAPI provides access to chronological text event storage.
-
-<small>`memory.go:43`</small>
 
 ### `Triple`
 

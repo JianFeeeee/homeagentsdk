@@ -195,11 +195,3 @@ sett 在 New 时一次性写入且无 setter，故不需要加锁。
 
 <small>`plugin.go:401`</small>
 
-### `SettingsAPI`
-
-```go
-type SettingsAPI interface { // Get reads the plugin's own config value (config_<name> table). Get(key string) (interface{}, error) // Set writes a config value to the plugi …
-```
-
-<small>`settings.go:3`</small>
-

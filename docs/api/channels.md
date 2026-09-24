@@ -268,18 +268,6 @@ const ContextPolicyPrune
 
 <small>`plugin.go:45`</small>
 
-### `IOInjector`
-
-```go
-type IOInjector interface { InjectInterruptText(source, channel, text string) InjectText(source, channel, text string) InjectTextNoMemory(source, channel, text string) // I …
-```
-
-IOInjector provides methods for injecting input and interrupts into the agent pipeline.
-All methods accept (source, channel) where channel is the target output channel
-for routing the agent's response.
-
-<small>`plugin.go:220`</small>
-
 ### `PluginSDK.InjectInputMedia`
 
 ```go

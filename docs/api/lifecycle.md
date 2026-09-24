@@ -89,16 +89,6 @@ AutoRestart 返回插件是否允许自动重启。
 
 <small>`plugin.go:791`</small>
 
-### `Plugin`
-
-```go
-type Plugin interface { Name() string Start(sdk *PluginSDK) error Stop() error }
-```
-
-Plugin is the interface every plugin must implement.
-
-<small>`plugin.go:13`</small>
-
 ### `PluginSDK.PluginMgr`
 
 ```go
@@ -109,17 +99,6 @@ PluginMgr returns the plugin manager API (ReloadOne / ReloadPlugins / list).
 May be nil if the host did not wire it.
 
 <small>`plugin.go:653`</small>
-
-### `PluginMgrAPI`
-
-```go
-type PluginMgrAPI interface { // ReloadOne 重载单个插件（停止后重新加载）。 ReloadOne(name string) error // ListLoadedPlugins 列出已加载插件。 ListLoa …
-```
-
-PluginMgrAPI 提供插件管理能力（外部插件可调用）。
-由 bridge 注入 dispatch 实现，走 C ABI CORE_PLUGIN_RELOAD_ONE 等。
-
-<small>`plugin.go:284`</small>
 
 ### `PluginSDK.PluginName`
 

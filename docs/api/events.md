@@ -44,18 +44,6 @@ EventHandler processes a system event.
 
 <small>`plugin.go:273`</small>
 
-### `EventSubscriber`
-
-```go
-type EventSubscriber interface { Subscribe(eventType EventType, handler EventHandler) func() }
-```
-
-EventSubscriber allows plugins to subscribe to kernel events.
-This is a restricted interface: plugins can subscribe but the kernel
-controls which events are delivered.
-
-<small>`plugin.go:278`</small>
-
 ### `EventType`
 
 ```go

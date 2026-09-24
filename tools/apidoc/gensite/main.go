@@ -180,7 +180,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	// 先收集所有待渲染的符号名，再扫 example/ 取真实用法。
+	// 收集所有待渲染的符号名，再扫 example/ 取真实用法。
 	want := map[string]bool{}
 	for _, s := range pkg.Symbols {
 		if s.Exported {
@@ -192,24 +192,40 @@ func main() {
 	}
 	usages := scanUsages(*exDir, want)
 
+	// 中文检索关键词（弥补英文注释搜不到中文的问题）。
+	kw, err := loadKeywords()
+	if err != nil {
+		log.Printf("警告：未加载中文检索关键词（%v），中文检索将只能命中中文注释", err)
+	}
+
 	used := map[string]bool{}
 	var index []indexEntry
 
 	for _, sec := range sections {
+		// 本节的接口（先算出来，下面要用它排除重复的 type 符号）。
+		var ifaces []Interface
+		ifaceNames := map[string]bool{}
+		for _, it := range pkg.Interfaces {
+			if sec.Match(Symbol{Kind: "type", Name: it.Name}) {
+				ifaces = append(ifaces, it)
+				ifaceNames[it.Name] = true
+			}
+		}
+
 		var picked []Symbol
 		for _, s := range pkg.Symbols {
 			if !s.Exported || !sec.Match(s) || used[key(s)] {
 				continue
 			}
+			// 接口已作为 ifaces 单独渲染（带方法表），这里跳过它的 `type`
+			// 符号，否则同一个接口会既出现在符号区、又出现在接口区，
+			// 检索索引里也会出现两条。
+			if s.Kind == "type" && ifaceNames[s.Name] {
+				used[key(s)] = true
+				continue
+			}
 			picked = append(picked, s)
 			used[key(s)] = true
-		}
-		// 该章节涉及的接口（其方法单独列在接口下，避免重复）。
-		var ifaces []Interface
-		for _, it := range pkg.Interfaces {
-			if sec.Match(Symbol{Kind: "type", Name: it.Name}) {
-				ifaces = append(ifaces, it)
-			}
 		}
 		if len(picked) == 0 && len(ifaces) == 0 {
 			continue
@@ -224,6 +240,7 @@ func main() {
 				N: s.Name, S: s.Signature, D: s.DocBrief,
 				K: s.Kind, R: s.Recv, P: sec.File,
 				B: s.BuiltinOnly, F: s.File, L: s.Line,
+				G: kw.lookup(s.Name, s.DocBrief),
 			})
 		}
 		// 接口本身与其方法也要进索引。此前只加了顶层符号，导致
@@ -238,6 +255,7 @@ func main() {
 					N: m.Name, S: m.Signature, D: m.DocBrief,
 					K: "method", R: it.Name, P: sec.File,
 					B: m.BuiltinOnly, F: m.File, L: m.Line,
+					G: kw.lookup(m.Name, m.DocBrief),
 				})
 			}
 		}
@@ -253,6 +271,7 @@ func main() {
 				index = append(index, indexEntry{
 					N: c.Name, S: "const " + c.Name, D: c.DocBrief,
 					K: "const", P: "constants", F: c.File, L: c.Line,
+					G: kw.lookup(c.Name, c.DocBrief),
 				})
 			}
 		}
@@ -300,6 +319,14 @@ type indexEntry struct {
 	B bool   `json:"b"` // 仅内置
 	F string `json:"f"` // 源文件
 	L int    `json:"l"` // 行号
+	// G 是中文检索关键词（同义词/功能词）。
+	//
+	// 为什么需要：SDK 里 100 个有摘要的符号中 **66 个是英文注释**
+	// （`RegisterTool registers a tool that the LLM can call.`），
+	// 于是搜「注册工具」根本找不到 RegisterTool —— 而中文是主要受众。
+	// 这些词由 tools/apidoc/keywords.json 维护，不改源码注释，
+	// 也不依赖机器翻译。
+	G []string `json:"g,omitempty"`
 }
 
 func key(s Symbol) string {
@@ -522,16 +549,19 @@ func renderExamples(usages map[string][]Usage) string {
 	return b.String()
 }
 
-// dedupeIndex 按「接收者.名称」去重。无接收者的用「类别.名称」。
-// 同名但不同接收者（如 MemoryAPI.Recall 与 IOInjector.InjectText）都保留。
+// dedupeIndex 按「接收者.名称.类别」去重。
+//
+// 为什么带类别：接口会被两条路径加进索引——一次作为 `type` 符号（来自
+// pkg.Symbols），一次作为接口本身（来自 pkg.Interfaces）。两者名字相同、
+// 接收者都为空，只用「名称」做键漏不掉；带上类别才能区分（并且保留两条
+// 也不算错，但会让结果重复，所以统一按 kind 去重）。
+//
+// 同名但不同接收者的（如 MemoryAPI.Recall 与 IOInjector.InjectText）都保留。
 func dedupeIndex(in []indexEntry) []indexEntry {
 	seen := map[string]bool{}
 	out := in[:0]
 	for _, e := range in {
-		k := e.R + "." + e.N
-		if e.R == "" {
-			k = e.K + "." + e.N
-		}
+		k := e.K + "|" + e.R + "." + e.N
 		if seen[k] {
 			continue
 		}
