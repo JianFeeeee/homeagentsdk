@@ -380,7 +380,7 @@ cd tools/hmapdev && go build -o hmapdev .
 ### 反向代理声明（`proxies`）
 
 插件自带 Web UI 或 HTTP API 时（如设备网关、插件管理页），声明后由 HomeAgent
-**从 webui 的同一端口**按子域反代出去——用户只要穿透一个端口即可访问全部插件服务，
+**从 webui 的同一端口**反代出去——用户只要穿透一个端口即可访问全部插件服务，
 无需为每个插件开端口或加转发规则。
 
 ```json
@@ -388,9 +388,10 @@ cd tools/hmapdev && go build -o hmapdev .
   "name": "my_plugin",
   "entry": "plugin.bin",
   "proxies": [
-    { "name": "ui", "host": "myapp", "target": "127.0.0.1:12100" },
-    { "name": "gw", "host": "myapp-gw", "target": "127.0.0.1:9890",
-      "websocket": true, "auth": "none" }
+    { "name": "ui", "host": "myapp", "path": "/p/myapp", "strip_path": true,
+      "target": "127.0.0.1:12100" },
+    { "name": "gw", "host": "myapp-gw", "path": "/api/v1/device",
+      "target": "127.0.0.1:9890", "websocket": true, "auth": "none" }
   ]
 }
 ```
@@ -402,22 +403,67 @@ cd tools/hmapdev && go build -o hmapdev .
 | `target` | ✅ | — | 上游地址，`127.0.0.1:12100` 或 `http://…`。可带路径前缀 |
 | `name` | | `service` | 服务标识，仅用于展示与日志 |
 | `host` | | 插件名派生 | 子域标签（`myapp` → `myapp.<基域名>`）。下划线自动转连字符 |
+| `path` | | — | 路径挂载前缀，让**非浏览器客户端**也能访问（见下） |
+| `strip_path` | | `false` | 转发前是否剥掉 `path` 前缀。见下方两种语义 |
 | `websocket` | | `false` | 是否需要 WebSocket 升级透传。**未声明时的升级请求会被明确拒绝** |
 | `auth` | | `homeagent` | `homeagent` = 由 HomeAgent 统一保护；`none` = 信任上游自身鉴权 |
 
-访问方式：
+#### 两种访问形态
 
-- 默认基域名是 `localhost`，因此 `<host>.localhost:<webui端口>` **开箱即用**
-  （RFC 6761 规定 `*.localhost` 解析到 loopback，无需 DNS/证书/hosts）。
-- 远程部署时把 webui 的 `base_domain` 设成你的域名，如 `webui.example.com`
-  ⇒ `<host>.webui.example.com`。
-- 在 WebUI 的「插件」页有**服务入口**列表，点「打开」直接访问。
+同一个声明**同时**提供两种入口（`host` 与 `path` 给的都算）：
 
-#### 为什么是子域而不是路径前缀
+| 形态 | 地址 | 适用 | 依赖 |
+|---|---|---|---|
+| 子域 | `myapp.<基域名>` | 浏览器 | 需要 DNS/泛解析（`*.localhost` 浏览器内置） |
+| 路径 | `<门户地址>/p/myapp/` | 设备/固件/CLI | **无 DNS 依赖**，只需能连门户 |
 
-插件前端普遍使用**根绝对路径**（`fetch('/api/status')`）。挂在 `/p/myapp/` 这类
-路径前缀下，这些请求会打到 HomeAgent 自己的 `/api/status` 上——静默错路由。
-子域路由下根路径天然正确，**插件前端无需任何改动**。
+路径形态是必要的：`*.localhost` 只有浏览器内置解析（RFC 6761），设备固件走系统
+解析器会以 `no such host` 失败；而且外层网关常有证书/放行限制，子域不一定可达
+（实测某部署只有 `homeagent.example.com` 一个 Host 可用，三级子域握手失败）。
+路径形态让这些客户端只连门户地址即可。
+
+#### `strip_path`：两种语义，必须显式选
+
+| 取值 | 语义 | 例子 | 适用 |
+|---|---|---|---|
+| `false`（默认） | **别名**：`path` 是上游真实路径的一部分 | `/api/v1/device/ws` + `path=/api/v1/device` → 上游收到 `/api/v1/device/ws` | 客户端**已硬编码**路径的机器接口 |
+| `true` | **前缀**：`path` 只是门户上的挂载点 | `/p/myapp/api/status` + `path=/p/myapp` → 上游收到 `/api/status` | 自带 UI 的服务 |
+
+不能自动判定——同一个 `path=/api/v1/device` 在两种语义下都说得通，猜错的结果是
+全部请求 404，且看起来像上游故障。
+
+#### ⚠️ 单一入口原则（对被反代的插件是硬要求）
+
+**一个声明 = 一个入口。** 插件的全部资源与接口都必须能从该入口的一个基准路径
+出发访问到，**不得依赖入口之外的根路径**——因为两种形态对「根路径」的处理不同：
+
+- 子域形态下根路径就是插件的根，`fetch('/api/status')` **天然正确**；
+- 路径形态下根路径属于**门户**，同样的代码会打到门户自己的 `/api/status`
+  ——**静默错路由：页面能开、功能全坏**。
+
+所以被反代的插件必须**一律使用相对路径**，绝不硬编码以 `/` 开头的绝对路径：
+
+```js
+// ✗ 路径形态下会打到门户自己
+fetch('/api/status')
+
+// ✓ 以当前文档目录为基准，两种形态都对
+const BASE = location.pathname.replace(/[^\/]*$/, '');
+fetch(BASE + 'api/status')
+```
+
+**自检**：把页面挂到 `<门户>/<任意前缀>/` 下访问，所有请求都必须仍打到插件自己。
+
+这样插件不必知道自己被挂在哪，反代层也能按外部条件（子域是否有证书/放行）
+自由选择形态。
+
+#### 两种形态都会提供
+
+反代层**同时**注册 `host` 与 `path` 两条入口——子域给浏览器（人用），路径给
+无 DNS 依赖的客户端（设备/固件/CLI），也可作为子域不可达时的兜底。
+
+代价是插件必须遵守上面的「单一入口原则」（前端用相对路径）。这是**一次性**的
+写法约束，换来的是插件不必关心自己被挂在哪里、部署方也能自由选择形态。
 
 #### 认证怎么选
 

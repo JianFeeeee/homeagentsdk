@@ -236,7 +236,7 @@ func (s *PluginSDK) DocMemory() DocMemoryAPI
 
 DocMemory returns the document memory API (may be nil if not available).
 
-<small>`plugin.go:418`</small>
+<small>`plugin.go:423`</small>
 
 ### `Entity`
 
@@ -278,7 +278,7 @@ Knowledge returns the knowledge store API (may be nil if not available).
 |---|---|---|
 | [`recoverydiag`](../examples/index.md#recoverydiag) | `example/recoverydiag/plugin.go:978` | `if p.sdk != nil && p.sdk.Knowledge() != nil {` |
 
-<small>`plugin.go:425`</small>
+<small>`plugin.go:430`</small>
 
 ### `MediaAttachment`
 
@@ -308,7 +308,7 @@ func (s *PluginSDK) Memory() MemoryAPI
 
 Memory returns the graph memory API (may be nil if not available).
 
-<small>`plugin.go:404`</small>
+<small>`plugin.go:409`</small>
 
 ### `PersonProfile`
 
@@ -338,7 +338,7 @@ func (s *PluginSDK) Social() SocialAPI
 
 Social returns the social graph API (may be nil if not available).
 
-<small>`plugin.go:439`</small>
+<small>`plugin.go:444`</small>
 
 ### `SocialRelation`
 
@@ -366,7 +366,7 @@ func (s *PluginSDK) TextMemory() TextMemoryAPI
 
 TextMemory returns the text memory API (may be nil if not available).
 
-<small>`plugin.go:411`</small>
+<small>`plugin.go:416`</small>
 
 ### `Triple`
 

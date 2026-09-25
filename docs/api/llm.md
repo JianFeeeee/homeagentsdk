@@ -46,5 +46,5 @@ func (s *PluginSDK) LLM() LLMAPI
 
 LLM returns the LLM provider API (may be nil if not available).
 
-<small>`plugin.go:432`</small>
+<small>`plugin.go:437`</small>
 

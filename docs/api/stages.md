@@ -83,7 +83,7 @@ RegisterStage registers a handler for a pipeline stage.
 | [`sanitizer`](../examples/index.md#sanitizer) | `example/sanitizer/plugin.go:52` | `s.RegisterStage(sdk.StageOnInput, func(ctx *sdk.StageContext) error {` |
 | [`weather`](../examples/index.md#weather) | `example/weather/plugin.go:94` | `s.RegisterStage(sdk.StageAfterToolcall, func(ctx *sdk.StageContext) error {` |
 
-<small>`plugin.go:467`</small>
+<small>`plugin.go:472`</small>
 
 ### `Stage`
 

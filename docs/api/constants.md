@@ -4,6 +4,13 @@
 
 SDK 里的取值枚举。其中带「仅内置」标注的取值在内核侧会被夹到较低级别。
 
+## ProxyAuthHomeAgent 等
+
+| 名称 | 说明 |
+|---|---|
+| `ProxyAuthHomeAgent` | ProxyAuthHomeAgent 表示由 HomeAgent 统一保护：浏览器走门户会话 |
+| `ProxyAuthNone` | ProxyAuthNone 表示不经 HomeAgent 鉴权，直接把请求转发给上游。 |
+
 ## StageOnInput 等
 
 | 名称 | 说明 |

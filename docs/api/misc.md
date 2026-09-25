@@ -680,7 +680,17 @@ Append(evt TextEvent) error
 type AudioURL struct { URL string `json:"url"` }
 ```
 
-<small>`plugin.go:862`</small>
+<small>`plugin.go:867`</small>
+
+### `EffectiveProxyAuth`
+
+```go
+func EffectiveProxyAuth(auth string) string
+```
+
+EffectiveProxyAuth 返回生效的鉴权模式（空串归一化为 ProxyAuthHomeAgent）。
+
+<small>`proxy.go:169`</small>
 
 ### `ImageURL`
 
@@ -688,7 +698,7 @@ type AudioURL struct { URL string `json:"url"` }
 type ImageURL struct { URL string `json:"url"` Detail string `json:"detail,omitempty"` }
 ```
 
-<small>`plugin.go:857`</small>
+<small>`plugin.go:862`</small>
 
 ### `MemItem`
 
@@ -699,6 +709,19 @@ type MemItem struct { Role string `json:"role"` Content string `json:"content"` 
 MemItem represents a memory item in stage context.
 
 <small>`plugin.go:179`</small>
+
+### `NormalizeProxyHost`
+
+```go
+func NormalizeProxyHost(pluginName string) string
+```
+
+NormalizeProxyHost 由插件名派生默认 Host 标签。
+
+下划线转连字符：插件名允许下划线（huawei_smarthome），但 DNS label 不允许，
+直接用会导致该子域名无法解析——这里统一转换，避免每个插件各自碰运气。
+
+<small>`proxy.go:202`</small>
 
 ### `PluginSDK`
 
@@ -711,6 +734,139 @@ It wraps tool registration, settings, memory, knowledge, LLM, and IO injection.
 
 <small>`plugin.go:337`</small>
 
+### `ProxyAuthHomeAgent`
+
+```go
+const ProxyAuthHomeAgent
+```
+
+ProxyAuthHomeAgent 表示由 HomeAgent 统一保护：浏览器走门户会话
+（homeagent_session cookie），非浏览器客户端走 X-API-Key。
+两者都没有时返回 401，而不是把请求透传给上游。
+
+<small>`proxy.go:149`</small>
+
+### `ProxyAuthNone`
+
+```go
+const ProxyAuthNone
+```
+
+ProxyAuthNone 表示不经 HomeAgent 鉴权，直接把请求转发给上游。
+
+适用场景：上游自己有鉴权且调用方不是浏览器（设备/嵌入式客户端），
+或上游是刻意公开的服务。选用它意味着**信任上游自身的鉴权**，
+且该服务在网络层可达范围内对所有人开放。
+
+<small>`proxy.go:156`</small>
+
+### `ProxyDef`
+
+```go
+type ProxyDef struct { // Name 是同一插件内多条声明的唯一标识（如 "ui"、"api"）。 // 运行期由 RegisterProxy 的第一个参数填入；声明式由 …
+```
+
+反向代理声明：插件告诉 HomeAgent「我起了个 HTTP 服务，请把它反代出去」。
+
+为什么需要：插件自带 Web UI / HTTP API 时，监听地址在插件自己的配置里
+（如 127.0.0.1:12100），外部无从得知；而 webui 的对外端口通常只有一个
+（默认 :8080，且常经 frp 单端口隧道穿透）。没有声明机制时，用户只能
+「知道端口 + 自己配转发」，插件换端口就失效。
+
+设计取舍——**声明式而非注册式**：声明写在 plugin.json 里，由 HomeAgent
+在加载插件时读取聚合，而不是让插件在运行期调 API 注册。理由：
+ 1. 静态可发现：未启动/已崩溃的插件，其服务声明依然可见（可给出准确报错
+    「插件 X 声明了 ui 但目标 127.0.0.1:12100 不可达」，而不是静默 404）；
+ 2. 可版本化：声明随插件包一起分发、可 diff、可审计；
+ 3. 旧内核无害：manifest 解析忽略未知字段，未支持该能力的 HomeAgent 读旧
+    插件、或旧 HomeAgent 读新插件都不会报错。
+
+与 ToolDef / ChannelDef / ConfigDef 同族：SDK 定义声明契约，内核实现行为。
+声明方式与其它能力一致 —— 在 Start() 里调 RegisterProxy(name, def)，
+或写进 plugin.json 的 proxies 字段（外部插件两种都支持）。
+
+安全性：**不声明 = 不被反代**。声明本身就是能力声明，因此不需要在
+capabilities 里另外开一个开关——最小权限默认生效。
+
+# 单一入口原则（强制要求）
+
+**一个声明 = 一个入口**。被反代的插件必须让它的全部资源与接口都能从
+该入口的一个基准路径出发访问到，不得依赖「入口之外的根路径」。
+
+为什么强制：反代有两种挂载形态，而它们对「根路径」的处理截然不同——
+
+	Host 形态（host）：插件独占 <标签>.<基域名>，根路径就是插件的根。
+	                  根绝对路径（fetch('/api/x')）**天然正确**。
+	Path 形态（path）：插件挂在门户自身 host 的某个前缀下，根路径属于**门户**。
+	                  此时插件里的 fetch('/api/x') 会打到门户自己的 /api/x
+	                  —— 静默错路由，页面能开但功能全坏。
+
+于是「同一个插件必须同时支持两种形态」这条要求，等价于：
+
+	**插件内部一律使用相对路径**（或基于 <base>/location 推导的路径），
+	绝不硬编码以 / 开头的绝对路径。
+
+这样同一份前端在两种形态下都正确，插件作者也不必知道自己被挂在哪。
+反代层据此可以：外部子域可用时给 Host 形态，子域不可用（证书/放行限制）
+时给 Path 形态，**无需插件配合改动**。
+
+自检（插件作者在本地就该做）：把页面挂到 <门户>/<任意前缀>/ 下访问，
+所有请求都必须仍然打到插件自己。
+
+本项目实测案例：某插件前端写死 fetch('/api/status')，配在
+/p/huawei/ 下会打到门户的 /api/status（404 或返回门户数据）；
+改成相对路径后两种形态同时可用。
+ProxyDef 是一个服务的**反代声明体**。
+
+与 ToolDef 同构：Name 同时出现在字段与 RegisterProxy 的第一个参数里
+（ToolDef 也是这么做的 —— 字段供 plugin.json 序列化，参数供运行期调用）。
+Name 只用于展示、日志与冲突提示，**不参与路由**（路由键是 Host 与 Path）。
+
+<small>`proxy.go:64`</small>
+
+### `ProxyRegistrar`
+
+```go
+type ProxyRegistrar func(name string, def ProxyDef)
+```
+
+ProxyRegistrar 由内核注入（与 ToolRegistrar / InputChannelRegistrar 同族）。
+插件不直接调它，用 RegisterProxy。
+
+为什么需要运行期注册（明明有 plugin.json 自动发现）：**内置插件**
+（编译进内核、没有独立插件目录与 plugin.json，如 remotedevice）扫不到；
+而它们恰恰最需要被反代出去（设备网关就是内置的）。两种来源互补：
+  - 外部插件 → plugin.json 的 proxies（静态，未启动也可见）
+  - 内置插件 → RegisterProxy（运行期，随 Start 注册）
+
+<small>`proxy.go:306`</small>
+
+### `PluginSDK.RegisterProxy`
+
+```go
+func (s *PluginSDK) RegisterProxy(name string, def ProxyDef)
+```
+
+RegisterProxy 声明一个需要 HomeAgent 反代出去的服务。
+
+与 RegisterTool / RegisterInputChannel / RegisterOutputChannel 同一风格：
+显式给名字 + 声明体。名字用于展示、日志与冲突提示（不参与路由 —— 路由键是
+def.Host / def.Path）。
+
+用法（通常在 Start 里调用）：
+
+	s.RegisterProxy("ui", sdk.ProxyDef{
+	    Host: "myapp", Target: "127.0.0.1:12100",
+	})
+
+声明立即生效（反代表在下一次请求时重建）。**不做去重**：同一 Host/Path
+被两条声明占用时由反代层判定冲突并明确报错，而不是在这里静默吞掉 ——
+插件作者需要看见冲突。
+
+与 plugin.json 的 proxies 字段等价：写哪个都行，两者会合并（同名以本调用为准）。
+
+<small>`proxy.go:335`</small>
+
 ### `SDKVersion`
 
 ```go
@@ -720,6 +876,16 @@ var SDKVersion
 SDKVersion 是对外暴露的 SDK 版本号。
 
 <small>`plugin.go:10`</small>
+
+### `PluginSDK.SetProxyRegistrar`
+
+```go
+func (s *PluginSDK) SetProxyRegistrar(r ProxyRegistrar)
+```
+
+SetProxyRegistrar 由内核注入。插件不直接调它（与 SetInputChannelRegistrar 同族）。
+
+<small>`proxy.go:309`</small>
 
 ### `PluginSDK.UnregisterOutputChannel`
 
@@ -732,5 +898,42 @@ func (s *PluginSDK) UnregisterOutputChannel(name string) error
 
 UnregisterOutputChannel 注销一个输出通道（动态通道随资源生灭时必须调用）。
 
-<small>`plugin.go:539`</small>
+<small>`plugin.go:544`</small>
+
+### `ValidProxyAuth`
+
+```go
+func ValidProxyAuth(auth string) bool
+```
+
+ValidProxyAuth 校验 Auth 取值；空串合法（等价 ProxyAuthHomeAgent）。
+
+<small>`proxy.go:160`</small>
+
+### `ValidProxyHostLabel`
+
+```go
+func ValidProxyHostLabel(label string) bool
+```
+
+ValidProxyHostLabel 校验子域名标签是否合法（DNS label 规则）。
+
+独立成导出函数：插件作者在写声明时、HomeAgent 在加载时、工具链在打包时
+都要用同一套规则判定，避免三处各写一份而互相不一致。
+
+<small>`proxy.go:180`</small>
+
+### `ValidateProxyDef`
+
+```go
+func ValidateProxyDef(d ProxyDef) string
+```
+
+ValidateProxyDef 校验一条反代声明，返回人类可读的错误说明（合法时为空）。
+
+为什么要在 SDK 里做校验：HomeAgent 加载插件时必须能明确拒绝坏声明并说明
+原因（而不是静默忽略导致用户以为配好了）；插件作者也需要在本地就能查出
+拼错的 Target/Host。同一套规则两端共用。
+
+<small>`proxy.go:229`</small>
 
