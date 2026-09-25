@@ -86,8 +86,10 @@ func TestProxyConfigSchemaKeys(t *testing.T) {
 		t.Fatal(err)
 	}
 	// 空结构体 + omitempty 会全部省略，所以改用非零值探测。
+	// 每个字段都必须出现在探测体里，否则「新增字段忘了同步」检测不出来。
 	raw, _ = json.Marshal(ProxyConfig{
-		Name: "n", Host: "h", Target: "t", WebSocket: true, Auth: "a",
+		Name: "n", Host: "h", Path: "/p", StripPath: true,
+		Target: "t", WebSocket: true, Auth: "a",
 	})
 	m = nil
 	_ = json.Unmarshal(raw, &m)

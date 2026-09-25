@@ -23,7 +23,7 @@ func (p *PlgConfig) ReplacesToSlice() []string {
 // validateProxies 在打包前校验反代声明，让插件作者**本地**就发现写错，
 // 而不是装到 HomeAgent 上才看到「声明被拒」。
 //
-// 校验规则与 SDK 的 sdk.ValidateProxyDecl 保持一致（同一套 DNS label / auth /
+// 校验规则与 SDK 的 sdk.ValidateProxyDef 保持一致（同一套 DNS label / auth /
 // target 规则）；工具链不 import SDK 是为了保持"打包机只需工具链"的独立性，
 // 两侧一致性由 SDK 仓与主仓的同名测试分别钉住。
 func validateProxies(list []ProxyConfig) error {
@@ -110,7 +110,7 @@ type PlgConfig struct {
 	//
 	// 为什么声明在 plugin.json 而不是运行期注册：静态可发现（插件没起来时
 	// 也能报「声明了 ui 但目标不可达」，而不是静默 404）、可版本化、旧内核无害。
-	// 字段语义见 SDK 的 sdk.ProxyDecl（工具链与内核共用同一套校验规则）。
+	// 字段语义见 SDK 的 sdk.ProxyDef（工具链与内核共用同一套校验规则）。
 	Proxies []ProxyConfig `json:"proxies,omitempty"`
 
 	// ResolvedSDK 是本次构建实际选中的 SDK 版本（build 按 SDK 声明解析后回填），
