@@ -318,6 +318,10 @@ func parseTargets(raw string) []string {
 }
 
 func writePluginJSON(plg *PlgConfig, platforms []string, entry string) {
+	if err := validateProxies(plg.Proxies); err != nil {
+		fmt.Printf("  error: 反代声明非法: %v\n", err)
+		os.Exit(1)
+	}
 	m := map[string]interface{}{
 		"name":        plg.Name,
 		"name_zh":     plg.NameZh,
@@ -332,6 +336,15 @@ func writePluginJSON(plg *PlgConfig, platforms []string, entry string) {
 	}
 	if len(plg.Tags) > 0 {
 		m["tags"] = plg.Tags
+	}
+	// ★ 反代声明必须原样带进产物。
+	//
+	// 这里刻意写成「白名单 map 重建」而非「读原 plugin.json 再改几项」：
+	// 重建能保证产物字段集合稳定、不被源目录里的临时字段污染。代价是
+	// **新增字段若忘了加进这个 map，会被静默丢弃**——插件作者写了声明、
+	// 本地测试正常、打包后失效。因此每次给 PlgConfig 加字段，这里必须同步。
+	if len(plg.Proxies) > 0 {
+		m["proxies"] = plg.Proxies
 	}
 	// 记录「用哪版 SDK 编的」：插件产物与内核协议绑定，出问题时这是第一个要看的字段。
 	if plg.ResolvedSDK != "" {

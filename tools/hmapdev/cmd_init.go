@@ -2,9 +2,11 @@ package main
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"text/template"
 )
@@ -16,6 +18,67 @@ func (p *PlgConfig) ReplacesToSlice() []string {
 	}
 	sort.Strings(s) // deterministic order
 	return s
+}
+
+// validateProxies 在打包前校验反代声明，让插件作者**本地**就发现写错，
+// 而不是装到 HomeAgent 上才看到「声明被拒」。
+//
+// 校验规则与 SDK 的 sdk.ValidateProxyDecl 保持一致（同一套 DNS label / auth /
+// target 规则）；工具链不 import SDK 是为了保持"打包机只需工具链"的独立性，
+// 两侧一致性由 SDK 仓与主仓的同名测试分别钉住。
+func validateProxies(list []ProxyConfig) error {
+	seen := map[string]bool{}
+	for i, p := range list {
+		if strings.TrimSpace(p.Target) == "" {
+			return fmt.Errorf("proxies[%d] (%s): target 不能为空", i, p.Name)
+		}
+		switch p.Auth {
+		case "", "homeagent", "none":
+		default:
+			return fmt.Errorf("proxies[%d] (%s): auth 只允许 \"\"/\"homeagent\"/\"none\"，得到 %q", i, p.Name, p.Auth)
+		}
+		if p.Host != "" {
+			if !validHostLabel(p.Host) {
+				return fmt.Errorf("proxies[%d] (%s): host %q 不是合法子域名标签（小写字母/数字/连字符，不以连字符开头结尾，≤63）", i, p.Name, p.Host)
+			}
+			if seen[p.Host] {
+				return fmt.Errorf("proxies[%d]: host %q 在同一声明里重复", i, p.Host)
+			}
+			seen[p.Host] = true
+		}
+		// 端口必须是数字：SplitHostPort 不校验数字，"host:abc" 会溜过去
+		raw := p.Target
+		if j := strings.Index(raw, "://"); j >= 0 {
+			raw = raw[j+3:]
+		}
+		if j := strings.IndexByte(raw, '/'); j >= 0 {
+			raw = raw[:j]
+		}
+		if h, port, err := net.SplitHostPort(raw); err == nil {
+			if h == "" {
+				return fmt.Errorf("proxies[%d] (%s): target %q 缺少主机", i, p.Name, p.Target)
+			}
+			if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 {
+				return fmt.Errorf("proxies[%d] (%s): target 端口非法（应为 1-65535）: %q", i, p.Name, p.Target)
+			}
+		}
+	}
+	return nil
+}
+
+func validHostLabel(s string) bool {
+	if s == "" || len(s) > 63 || s[0] == '-' || s[len(s)-1] == '-' {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c >= 'a' && c <= 'z', c >= '0' && c <= '9', c == '-':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 type PlgConfig struct {
@@ -42,6 +105,13 @@ type PlgConfig struct {
 	// 出错时表现为莫名其妙的编译错误）。写中版本表示「只要 1.2 这条接口线，
 	// 补丁由工具链挑最新」（patch 只含工具链/打包修复，接口不变，见 README 版本语义）。
 	SDK string `json:"sdk,omitempty"`
+
+	// Proxies 声明本插件需要 HomeAgent 反代出去的服务（自带 Web UI / HTTP API）。
+	//
+	// 为什么声明在 plugin.json 而不是运行期注册：静态可发现（插件没起来时
+	// 也能报「声明了 ui 但目标不可达」，而不是静默 404）、可版本化、旧内核无害。
+	// 字段语义见 SDK 的 sdk.ProxyDecl（工具链与内核共用同一套校验规则）。
+	Proxies []ProxyConfig `json:"proxies,omitempty"`
 
 	// ResolvedSDK 是本次构建实际选中的 SDK 版本（build 按 SDK 声明解析后回填），
 	// 只写进产物里的 plugin.json，便于事后追溯「这个 .hmap 是哪版 SDK 编的」。

@@ -377,6 +377,59 @@ cd tools/hmapdev && go build -o hmapdev .
 | `--sdk-path <path>` | 指定 SDK 源码路径（覆盖 plg.json 中的 `sdk_path`） |
 | `--replace <from=to>` / `-R` | Go 模块替换（追加到 plg.json 中的 replaces），`from` 为模块路径，`to` 为本地路径 |
 
+### 反向代理声明（`proxies`）
+
+插件自带 Web UI 或 HTTP API 时（如设备网关、插件管理页），声明后由 HomeAgent
+**从 webui 的同一端口**按子域反代出去——用户只要穿透一个端口即可访问全部插件服务，
+无需为每个插件开端口或加转发规则。
+
+```json
+{
+  "name": "my_plugin",
+  "entry": "plugin.bin",
+  "proxies": [
+    { "name": "ui", "host": "myapp", "target": "127.0.0.1:12100" },
+    { "name": "gw", "host": "myapp-gw", "target": "127.0.0.1:9890",
+      "websocket": true, "auth": "none" }
+  ]
+}
+```
+
+字段：
+
+| 字段 | 必填 | 默认 | 说明 |
+|---|---|---|---|
+| `target` | ✅ | — | 上游地址，`127.0.0.1:12100` 或 `http://…`。可带路径前缀 |
+| `name` | | `service` | 服务标识，仅用于展示与日志 |
+| `host` | | 插件名派生 | 子域标签（`myapp` → `myapp.<基域名>`）。下划线自动转连字符 |
+| `websocket` | | `false` | 是否需要 WebSocket 升级透传。**未声明时的升级请求会被明确拒绝** |
+| `auth` | | `homeagent` | `homeagent` = 由 HomeAgent 统一保护；`none` = 信任上游自身鉴权 |
+
+访问方式：
+
+- 默认基域名是 `localhost`，因此 `<host>.localhost:<webui端口>` **开箱即用**
+  （RFC 6761 规定 `*.localhost` 解析到 loopback，无需 DNS/证书/hosts）。
+- 远程部署时把 webui 的 `base_domain` 设成你的域名，如 `webui.example.com`
+  ⇒ `<host>.webui.example.com`。
+- 在 WebUI 的「插件」页有**服务入口**列表，点「打开」直接访问。
+
+#### 为什么是子域而不是路径前缀
+
+插件前端普遍使用**根绝对路径**（`fetch('/api/status')`）。挂在 `/p/myapp/` 这类
+路径前缀下，这些请求会打到 HomeAgent 自己的 `/api/status` 上——静默错路由。
+子域路由下根路径天然正确，**插件前端无需任何改动**。
+
+#### 认证怎么选
+
+- `auth: "homeagent"`（默认）：适合**人用**的管理界面。浏览器需先登录门户，
+  脚本用 `X-API-Key` 或 `?__token=<key>`。
+- `auth: "none"`：适合**设备/嵌入式客户端**（它们不可能持有浏览器会话），
+  前提是**上游自己有鉴权**（如设备网关的接入令牌）。选它意味着该服务在
+  网络可达范围内对所有人开放，请确认上游确实会校验。
+
+> 内置插件（编译进内核、没有 plugin.json）用 `s.DeclareProxy(sdk.ProxyDecl{…})`
+> 在 `Start` 里声明，字段语义完全相同。
+
 ### plg.json 清单格式
 
 ```json
@@ -389,6 +442,7 @@ cd tools/hmapdev && go build -o hmapdev .
   "author": "HomeAgent",
   "entry": "plugin.bin",
   "tags": ["weather", "forecast"],
+  "proxies": [{"name": "ui", "host": "weather", "target": "127.0.0.1:12100"}],
   "targets": "linux/amd64,windows/amd64",
   "outdir": "dist",
   "bundle": true,
