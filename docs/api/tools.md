@@ -14,7 +14,7 @@ ContentBlock 是多模态内容块（OpenAI 格式：text/image_url/audio_url）
 插件工具返回结果时可用 PluginSDK.SetToolBlocks 注入，让下一轮 LLM
 请求在 tool message 的 content 数组里带上图片/音频，实现"模型看图/听音频"。
 
-<small>`plugin.go:850`</small>
+<small>`plugin.go:855`</small>
 
 ### `PluginSDK.RegisterTool`
 
@@ -33,7 +33,7 @@ RegisterTool registers a tool that the LLM can call.
 | [`ai_image`](../examples/index.md#ai_image) | `example/ai_image/plugin.go:159` | `s.RegisterTool(tp+"generate", sdk.ToolDef{` |
 | [`bili`](../examples/index.md#bili) | `example/bili/plugin.go:47` | `s.RegisterTool(tp+"video", sdk.ToolDef{` |
 
-<small>`plugin.go:453`</small>
+<small>`plugin.go:458`</small>
 
 ### `ToolCall`
 

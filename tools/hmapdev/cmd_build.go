@@ -337,6 +337,12 @@ func writePluginJSON(plg *PlgConfig, platforms []string, entry string) {
 	if plg.ResolvedSDK != "" {
 		m["sdk"] = plg.ResolvedSDK
 	}
+	// 反代声明必须写进产物：内核靠读 plugin.json 的 proxies 才知道该把
+	// 哪个服务反向代理出去。漏写的话插件**装得上、启动正常、就是不出现** ——
+	// 没有任何报错，只有「访问不到」。这正是当初新增该字段时踩过的坑。
+	if len(plg.Proxies) > 0 {
+		m["proxies"] = plg.Proxies
+	}
 	data, _ := json.MarshalIndent(m, "", "  ")
 	os.WriteFile("plugin.json", data, 0644)
 }

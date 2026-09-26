@@ -57,7 +57,7 @@ OutputChannelUnregistrar 注销一个输出通道。
 func (s *PluginSDK) SetDocMemoryAPI(dm DocMemoryAPI)
 ```
 
-<small>`plugin.go:614`</small>
+<small>`plugin.go:619`</small>
 
 ### `PluginSDK.SetEventSubscriber`
 
@@ -68,7 +68,7 @@ func (s *PluginSDK) SetDocMemoryAPI(dm DocMemoryAPI)
 func (s *PluginSDK) SetEventSubscriber(es EventSubscriber)
 ```
 
-<small>`plugin.go:638`</small>
+<small>`plugin.go:643`</small>
 
 ### `PluginSDK.SetIOInjector`
 
@@ -81,7 +81,7 @@ func (s *PluginSDK) SetIOInjector(io IOInjector)
 
 SetIOInjector sets the IO injector (called by the core at startup).
 
-<small>`plugin.go:595`</small>
+<small>`plugin.go:600`</small>
 
 ### `PluginSDK.SetInputChannelRegistrar`
 
@@ -94,7 +94,7 @@ func (s *PluginSDK) SetInputChannelRegistrar(r InputChannelRegistrar)
 
 SetInputChannelRegistrar sets the input channel registrar (called by the core at startup).
 
-<small>`plugin.go:588`</small>
+<small>`plugin.go:593`</small>
 
 ### `PluginSDK.SetKnowledgeAPI`
 
@@ -105,7 +105,7 @@ SetInputChannelRegistrar sets the input channel registrar (called by the core at
 func (s *PluginSDK) SetKnowledgeAPI(kn KnowledgeAPI)
 ```
 
-<small>`plugin.go:620`</small>
+<small>`plugin.go:625`</small>
 
 ### `PluginSDK.SetLLMAPI`
 
@@ -116,7 +116,7 @@ func (s *PluginSDK) SetKnowledgeAPI(kn KnowledgeAPI)
 func (s *PluginSDK) SetLLMAPI(llm LLMAPI)
 ```
 
-<small>`plugin.go:626`</small>
+<small>`plugin.go:631`</small>
 
 ### `PluginSDK.SetMemoryAPI`
 
@@ -129,7 +129,7 @@ func (s *PluginSDK) SetMemoryAPI(mem MemoryAPI)
 
 SetMemoryAPI sets the memory API (called by the core at startup).
 
-<small>`plugin.go:602`</small>
+<small>`plugin.go:607`</small>
 
 ### `PluginSDK.SetOutputChannelRegistrar`
 
@@ -142,7 +142,7 @@ func (s *PluginSDK) SetOutputChannelRegistrar(r OutputChannelRegistrar)
 
 SetOutputChannelRegistrar sets the output channel registrar (called by the core at startup).
 
-<small>`plugin.go:574`</small>
+<small>`plugin.go:579`</small>
 
 ### `PluginSDK.SetOutputChannelUnregistrar`
 
@@ -155,7 +155,7 @@ func (s *PluginSDK) SetOutputChannelUnregistrar(r OutputChannelUnregistrar)
 
 SetOutputChannelUnregistrar sets the output channel unregistrar (called by the core at startup).
 
-<small>`plugin.go:581`</small>
+<small>`plugin.go:586`</small>
 
 ### `PluginSDK.SetPluginMgrAPI`
 
@@ -168,7 +168,7 @@ func (s *PluginSDK) SetPluginMgrAPI(pm PluginMgrAPI)
 
 SetPluginMgrAPI sets the plugin manager API (called by the bridge at startup).
 
-<small>`plugin.go:645`</small>
+<small>`plugin.go:650`</small>
 
 ### `PluginSDK.SetSocialAPI`
 
@@ -179,7 +179,7 @@ SetPluginMgrAPI sets the plugin manager API (called by the bridge at startup).
 func (s *PluginSDK) SetSocialAPI(social SocialAPI)
 ```
 
-<small>`plugin.go:632`</small>
+<small>`plugin.go:637`</small>
 
 ### `PluginSDK.SetTextMemoryAPI`
 
@@ -190,7 +190,7 @@ func (s *PluginSDK) SetSocialAPI(social SocialAPI)
 func (s *PluginSDK) SetTextMemoryAPI(tm TextMemoryAPI)
 ```
 
-<small>`plugin.go:608`</small>
+<small>`plugin.go:613`</small>
 
 ### `ToolRegistrar`
 

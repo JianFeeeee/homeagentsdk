@@ -87,7 +87,7 @@ func (s *PluginSDK) AutoRestart() bool
 
 AutoRestart 返回插件是否允许自动重启。
 
-<small>`plugin.go:791`</small>
+<small>`plugin.go:796`</small>
 
 ### `PluginSDK.PluginMgr`
 
@@ -98,7 +98,7 @@ func (s *PluginSDK) PluginMgr() PluginMgrAPI
 PluginMgr returns the plugin manager API (ReloadOne / ReloadPlugins / list).
 May be nil if the host did not wire it.
 
-<small>`plugin.go:653`</small>
+<small>`plugin.go:658`</small>
 
 ### `PluginSDK.PluginName`
 
@@ -108,7 +108,7 @@ func (s *PluginSDK) PluginName() string
 
 PluginName returns the name of the plugin.
 
-<small>`plugin.go:397`</small>
+<small>`plugin.go:402`</small>
 
 ### `PluginSDK.RegisterOnRemoveHandler`
 
@@ -129,7 +129,7 @@ RegisterOnRemoveHandler 注册插件被删除（卸载）时的清理回调。
 | [`memo`](../examples/index.md#memo) | `example/memo/plugin.go:69` | `s.RegisterOnRemoveHandler(p.cleanupData)` |
 | [`rss`](../examples/index.md#rss) | `example/rss/plugin.go:127` | `s.RegisterOnRemoveHandler(p.cleanupData)` |
 
-<small>`plugin.go:826`</small>
+<small>`plugin.go:831`</small>
 
 ### `PluginSDK.RegisterPluginAPI`
 
@@ -139,7 +139,7 @@ func (s *PluginSDK) RegisterPluginAPI(name string) error
 
 RegisterPluginAPI registers this plugin's API for access by other plugins.
 
-<small>`plugin.go:502`</small>
+<small>`plugin.go:507`</small>
 
 ### `PluginSDK.RegisterStopHandler`
 
@@ -159,7 +159,7 @@ RegisterStopHandler 注册插件停止阶段的清理回调。
 | [`calendar`](../examples/index.md#calendar) | `example/calendar/plugin.go:294` | `s.RegisterStopHandler(p.saveEvents)` |
 | [`deepsearch`](../examples/index.md#deepsearch) | `example/deepsearch/plugin.go:695` | `s.RegisterStopHandler(func() { p.shutdownSearxng() })` |
 
-<small>`plugin.go:801`</small>
+<small>`plugin.go:806`</small>
 
 ### `PluginSDK.RunOnRemoveHandlers`
 
@@ -170,7 +170,7 @@ func (s *PluginSDK) RunOnRemoveHandlers()
 RunOnRemoveHandlers 执行全部已注册的 onRemove handler（后注册先执行，执行后清空，幂等）。
 由内核在卸载插件（registry.RemovePlugin）时、插件 Stop() 之后执行。
 
-<small>`plugin.go:837`</small>
+<small>`plugin.go:842`</small>
 
 ### `PluginSDK.RunStopHandlers`
 
@@ -181,7 +181,7 @@ func (s *PluginSDK) RunStopHandlers()
 RunStopHandlers 执行全部已注册的 stop handler（后注册先执行，执行后清空，幂等）。
 由内核（内置插件）或插件桥接层（外部插件 z_bridge 的 StopPlugin）在调用插件 Stop() 前执行。
 
-<small>`plugin.go:812`</small>
+<small>`plugin.go:817`</small>
 
 ### `PluginSDK.SetAutoRestart`
 
@@ -205,5 +205,5 @@ SetAutoRestart 设置插件崩溃后内核是否自动重启它。
 | [`ai_image`](../examples/index.md#ai_image) | `example/ai_image/plugin.go:110` | `s.SetAutoRestart(true)` |
 | [`bili`](../examples/index.md#bili) | `example/bili/plugin.go:25` | `s.SetAutoRestart(true)` |
 
-<small>`plugin.go:784`</small>
+<small>`plugin.go:789`</small>
 
