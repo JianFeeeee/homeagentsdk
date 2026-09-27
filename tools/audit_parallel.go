@@ -300,18 +300,35 @@ func indexMethods(fset *token.FileSet, files map[string]*ast.File) map[string]*m
 				continue
 			}
 			name := fd.Name.Name
+			recv := ""
 			if fd.Recv != nil && len(fd.Recv.List) > 0 {
-				if t, ok := fd.Recv.List[0].Type.(*ast.StarExpr); ok {
+				rt := fd.Recv.List[0].Type
+				if t, ok := rt.(*ast.StarExpr); ok {
 					if id, ok := t.X.(*ast.Ident); ok {
-						name = "*" + id.Name + "." + name
+						recv = id.Name
 					}
+				} else if id, ok := rt.(*ast.Ident); ok {
+					recv = id.Name
+				}
+				if recv != "" {
+					name = "*" + recv + "." + name
 				}
 			}
-			out[name] = &methodImpl{
-				file:   path,
-				line:   fset.Position(fd.Pos()).Line,
-				body:   fd.Body,
-				locked: hasMutexIn(fd.Body),
+			// ★ recv 与 selfCalls 都必须填：scanWritesDeep 用 recv 组候选键去
+			//   跟进下层方法，用 selfCalls 才知道要跟进谁。缺任何一个，
+			//   递归跟进就是空转 —— handlerRestart → p.stopServer/startServer
+			//   这类"只调两个方法"的写法会静默漏判成只读。
+			mi := &methodImpl{
+				file:      path,
+				line:      fset.Position(fd.Pos()).Line,
+				body:      fd.Body,
+				recv:      recv,
+				locked:    hasMutexIn(fd.Body),
+				selfCalls: selfCallsOf(fd.Body),
+			}
+			out[name] = mi
+			if recv != "" {
+				out[recv+"."+fd.Name.Name] = mi
 			}
 		}
 	}
@@ -325,7 +342,11 @@ func handlerImplOf(call *ast.CallExpr, fset *token.FileSet, methods map[string]*
 	}
 	switch a := call.Args[2].(type) {
 	case *ast.FuncLit: // 闭包
-		return &methodImpl{file: "<closure>", line: fset.Position(a.Pos()).Line, body: a.Body, locked: hasMutexIn(a.Body)}
+		// ⚠️ recv 留空是有代价的：scanWritesDeep 跟进 selfCalls 时用
+		// "*"+recv+"."+name 找方法实现，recv 为空就永远找不到 ⇒
+		// 闭包里对 p.xxx(...) 的调用全部追不下去，write 被静默漏掉。
+		// 症状是"看起来有扫描、实际漏判"。
+		return &methodImpl{file: "<closure>", line: fset.Position(a.Pos()).Line, body: a.Body, locked: hasMutexIn(a.Body), selfCalls: selfCallsOf(a.Body)}
 	case *ast.SelectorExpr: // p.handleRead
 		//
 		// ★ 这里踩过一个隐蔽的坑：调用点的接收者是**变量名**（p），
@@ -380,7 +401,15 @@ func toolNameOf(call *ast.CallExpr, fset *token.FileSet) string {
 		if lit, ok := a.Y.(*ast.BasicLit); ok {
 			rhs = strings.Trim(lit.Value, `"`)
 		}
-		return lhs + "_" + rhs
+		// 归一化：变量前缀（p.name / tp / p.tp）在运行期才确定，
+		// 静态只保留字面量那一段，前缀分隔符一并去掉。
+		if _, isIdent := a.X.(*ast.Ident); isIdent {
+			return rhs
+		}
+		if i := strings.Index(lhs, "."); i >= 0 {
+			lhs = lhs[i+1:]
+		}
+		return lhs + rhs
 	case *ast.Ident:
 		return a.Name
 	case *ast.SelectorExpr:
@@ -447,19 +476,25 @@ var writePatterns = []struct{ what, pat string }{
 	{"mkdir", "os.MkdirAll"},
 	{"http-post", "http.Post"},
 	{"http-do", "client.Do"},
-	{"sdk-set", ".Set("},
-	{"sdk-save", ".Save("},
-	{"sdk-update", ".Update("},
-	{"sdk-delete", ".Delete("},
-	{"sdk-add", ".Add("},
-	{"sdk-install", ".Install("},
-	{"sdk-restart", ".Restart("},
-	{"sdk-shutdown", ".Shutdown("},
-	{"write", ".Write("},
-	{"write", ".WriteString("},
-	{"start", ".Start("},
-	{"stop", ".Stop("},
-	{"kill", ".Kill("},
+	// ⚠️ 这些模式**不带括号**：callString 收集的是链上方法名并用点连起来
+	// （"Settings.Set"），不是完整调用文本。我第一版写成 ".Set("，
+	// 于是永远匹配不上 —— handleConfigure（写配置 + 启停服务）被判只读。
+	// 症状是"漏判"，比误判更难发现：结果看起来仍然合理。
+	{"sdk-set", ".Set"},
+	{"sdk-save", ".Save"},
+	{"sdk-update", ".Update"},
+	{"sdk-delete", ".Delete"},
+	{"sdk-add", ".Add"},
+	{"sdk-install", ".Install"},
+	{"sdk-restart", ".Restart"},
+	{"sdk-shutdown", ".Shutdown"},
+	{"write", ".Write"},
+	{"start", ".Start"},
+	{"stop", ".Stop"},
+	{"kill", ".Kill"},
+	{"os-write", "os.WriteFile"},
+	{"os-remove", "os.Remove"},
+	{"exec", "exec.Command"},
 }
 
 func scanWrites(body *ast.BlockStmt) []finding {
@@ -588,11 +623,55 @@ func diagOf(call *ast.CallExpr) string {
 	return fmt.Sprintf("%T", call.Args[2])
 }
 
+// knownReadOnlyCalls 是**确认无副作用**的调用/构造器。
+//
+// ⚠️ 这张表必须显式列出，不能靠"名字不像写操作"来猜：我第一版用
+// looksLikeExternal（黑名单），结果 Marshal / ReadAll / NewRequest /
+// NewReader 这些**纯读**的标准库调用全被判"可能写" ⇒ 只读的
+// get_article 变成 SERIAL，120 个工具里 119 个被判串行 ——
+// 等于工具没在工作，却看上去在工作（保守方向不会引起怀疑）。
+//
+// 判定原则：**默认怀疑，明确信任**。写不动的东西要逐个列出来。
+var knownReadOnlyCalls = map[string]bool{
+	// 格式化
+	"Sprintf": true, "Fprintf": true, "Errorf": true, "Fatalf": true,
+	"Printf": true, "Sprintln": true, "Sprint": true, "Sscanf": true,
+	// 字符串（纯函数）
+	"String": true, "TrimSpace": true, "Trim": true, "TrimPrefix": true,
+	"TrimSuffix": true, "Split": true, "SplitN": true, "Join": true,
+	"Replace": true, "ReplaceAll": true, "ToLower": true, "ToUpper": true,
+	"Contains": true, "HasPrefix": true, "HasSuffix": true, "Fields": true,
+	"Repeat": true, "EqualFold": true, "Title": true,
+	// 数值
+	"Min": true, "Max": true, "Abs": true, "Round": true, "Floor": true, "Ceil": true,
+	// 编解码（纯变换）
+	"Marshal": true, "Unmarshal": true, "NewDecoder": true, "NewEncoder": true,
+	// JSON 读取（只读文件/流，不写）
+	"NewReader": true, "ReadAll": true, "Read": true, "Decode": true,
+	// HTTP 只读侧
+	"NewRequest": true, "NewRequestWithContext": true, "Parse": true, "ParseForm": true,
+	// 时间
+	"Now": true, "Unix": true, "ParseDuration": true, "After": true,
+	// 容器
+	"New": true, "NewMap": true, "Keys": true, "Values": true,
+	"Len": true, "Cap": true, "Copy": true, "Append": true,
+	// 容器查
+	"Get": true, "Load": true, "Exists": true, "List": true, "Query": true,
+	// 文件只读
+	"Stat": true, "ReadDir": true, "ReadFile": true, "Glob": true, "Walk": true,
+	// 错误
+	"Is": true, "As": true, "Unwrap": true, "Error": true,
+}
+
 func looksLikeExternal(name string) bool {
-	switch name {
-	case "Errorf", "Sprintf", "Fatalf", "Printf", "String", "TrimSpace",
-		"Split", "Join", "New", "Now", "Unix", "Abs", "Min", "Max", "Len", "Cap":
+	if knownReadOnlyCalls[name] {
 		return false
+	}
+	// 指针/包前缀形式（strings.TrimSpace）取最后一段
+	if i := strings.LastIndex(name, "."); i >= 0 {
+		if knownReadOnlyCalls[name[i+1:]] {
+			return false
+		}
 	}
 	return true
 }

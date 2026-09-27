@@ -51,6 +51,14 @@ func main() {
 			fmt.Fprintf(os.Stderr, "  跳过 %s: %v\n", j.tool, err)
 			continue
 		}
+		// 幂等：块内已有并发声明就跳过。
+		//
+		// 不加这条时，重跑会在已标注的工具上**再插一份** —— 而
+		// duplicate field name 是编译期错误，跨文件批量跑时定位成本很高。
+		if blockHasDecl(lines, j.tool) {
+			fmt.Printf("  %s 已有声明，跳过\n", j.tool)
+			continue
+		}
 		field := "ParallelSafe: true,"
 		if j.kind == "serial" {
 			field = "Serial: true,"
@@ -67,12 +75,34 @@ func main() {
 
 // findInsertPoint 找到该 RegisterTool 字面量中，Parameters 闭合之后的位置。
 func findInsertPoint(lines []string, tool string) (int, error) {
+	// 匹配两种注册形式：
+	//   RegisterTool("get_article", ...)        字面量
+	//   RegisterTool(tp+"get_article", ...)     变量前缀 + 字面量
+	// 只认字面量会漏掉后者 —— example 里绝大多数是变量前缀形式。
 	head := fmt.Sprintf(`RegisterTool("%s"`, tool)
+	alt := fmt.Sprintf(`+"%s"`, tool)
 	start := -1
 	for i, l := range lines {
 		if strings.Contains(l, head) {
 			start = i
 			break
+		}
+	}
+	if start < 0 {
+		// ★ 必须 RegisterTool( 与字面量在**同一行**。
+		//
+		// 我第一版只找含 `+"name"` 的行，命中了函数体里的散落字面量
+		// （vanblog 的 handleAuth 里满是 "restore"/"update" 这类 case 分支），
+		// 起点错到函数体中间，深度追踪再也回不到 2 ⇒ 插入点落在 1300+ 行，
+		// 把文件改坏。
+		//
+		// 症状离原因很远：报错说"expected 1 expression"，指向的是一处
+		// 看起来完全正常的 case 分支。
+		for i, l := range lines {
+			if strings.Contains(l, alt) && strings.Contains(l, "RegisterTool(") {
+				start = i
+				break
+			}
 		}
 	}
 	if start < 0 {
@@ -85,6 +115,11 @@ func findInsertPoint(lines []string, tool string) (int, error) {
 	inStr := false
 	esc := false
 	for i := start; i < len(lines); i++ {
+		// peak = 本行内的峰值深度。
+		//
+		// 每行重置：它表示"这一行曾深入到多深"，不是全程最大值 ——
+		// 全程最大值一旦到过 3 就永远是 3，"曾进入 Parameters"判据随之失效。
+		peak := depth
 		for _, ch := range lines[i] {
 			if esc {
 				esc = false
@@ -105,6 +140,9 @@ func findInsertPoint(lines []string, tool string) (int, error) {
 			case '(', '{', '[':
 				depth++
 				started = true
+				if depth > peak {
+					peak = depth
+				}
 			case ')', '}', ']':
 				depth--
 			}
@@ -133,14 +171,51 @@ func findInsertPoint(lines []string, tool string) (int, error) {
 		//  2. Name:/Description: 本来就在深度 2，早于 Parameters。
 		//     只判 depth==2 会在 Name 行就返回，插入点跑到 RegisterTool 之前，
 		//     编译报 "expected 1 expression"。
-		if started && depth >= 3 {
+		// 判定"进入过 Parameters"要按**行内峰值深度**，不能只看行末净深度。
+		//
+		// get_meta 的 Parameters 全在一行：
+		//     Parameters: map[string]interface{}{"type":"object","properties":map[string]interface{}{}},
+		// 这行净深度变化是 0（进去又出来）—— 只看净深就永远察觉不到曾进入
+		// 深度 3 ⇒ 追踪一路跑到 1305 行才"收敛"，插入点落在某个 case 分支
+		// 中间，文件改坏。症状离原因很远：报错指向一处看起来完全正常的
+		// switch case。
+		if started && peak >= 3 {
 			enteredAt = i
 		}
-		if enteredAt >= 0 && i > enteredAt && depth <= 2 {
+		// 闭合判定：进入过 Parameters（enteredAt）之后，深度回到 2 的那一行
+		// **就是** Parameters 的闭合行；插入点取它的**下一行**。
+		//
+		// ★ 不能要求 i > enteredAt：Parameters 写在单行时（get_meta 就是）
+		//   enteredAt 与闭合行是**同一行**，加上这个条件会跳到再下一行，
+		//   插到 log.Printf 之前 —— 不报错，但声明落在了字面量外面。
+		if enteredAt >= 0 && i >= enteredAt && depth <= 2 {
 			return i + 1, nil
 		}
 	}
 	return 0, fmt.Errorf("括号深度追踪未收敛")
+}
+
+// blockHasDecl 报告该工具的字面量里是否已有并发声明。
+func blockHasDecl(lines []string, tool string) bool {
+	head := fmt.Sprintf(`RegisterTool("%s"`, tool)
+	alt := fmt.Sprintf(`+"%s"`, tool)
+	start := -1
+	for i, l := range lines {
+		if strings.Contains(l, head) || (strings.Contains(l, alt) && strings.Contains(l, "RegisterTool(")) {
+			start = i
+			break
+		}
+	}
+	if start < 0 {
+		return false
+	}
+	// 从注册行往后找 30 行（工具定义不会更长）
+	for i := start; i < len(lines) && i <= start+30; i++ {
+		if strings.Contains(lines[i], "ParallelSafe:") || strings.Contains(lines[i], "Serial:") {
+			return true
+		}
+	}
+	return false
 }
 
 func readLines(p string) []string {
