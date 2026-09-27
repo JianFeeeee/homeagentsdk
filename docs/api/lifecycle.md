@@ -203,7 +203,7 @@ SetAutoRestart 设置插件崩溃后内核是否自动重启它。
 | [`a2a`](../examples/index.md#a2a) | `example/a2a/plugin.go:47` | `s.SetAutoRestart(true)` |
 | [`acp`](../examples/index.md#acp) | `example/acp/plugin.go:47` | `s.SetAutoRestart(true)` |
 | [`ai_image`](../examples/index.md#ai_image) | `example/ai_image/plugin.go:110` | `s.SetAutoRestart(true)` |
-| [`bili`](../examples/index.md#bili) | `example/bili/plugin.go:25` | `s.SetAutoRestart(true)` |
+| [`bili`](../examples/index.md#bili) | `example/bili/plugin.go:63` | `s.SetAutoRestart(true)` |
 
 <small>`plugin.go:888`</small>
 

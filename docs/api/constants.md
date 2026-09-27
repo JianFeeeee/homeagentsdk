@@ -30,6 +30,13 @@ SDK 里的取值枚举。其中带「仅内置」标注的取值在内核侧会�
 | `RecallPolicyNone` |  |
 | `RecallPolicyAuto` |  |
 
+## ScenePolicyAuto 等
+
+| 名称 | 说明 |
+|---|---|
+| `ScenePolicyAuto` |  |
+| `ScenePolicyNone` |  |
+
 ## PriorityL1 等
 
 | 名称 | 说明 |

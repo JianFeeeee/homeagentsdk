@@ -31,7 +31,7 @@ RegisterTool registers a tool that the LLM can call.
 | [`a2a`](../examples/index.md#a2a) | `example/a2a/plugin.go:76` | `s.RegisterTool(tp+"a2a_query", sdk.ToolDef{` |
 | [`acp`](../examples/index.md#acp) | `example/acp/plugin.go:70` | `s.RegisterTool(tp+"acp_query", sdk.ToolDef{` |
 | [`ai_image`](../examples/index.md#ai_image) | `example/ai_image/plugin.go:159` | `s.RegisterTool(tp+"generate", sdk.ToolDef{` |
-| [`bili`](../examples/index.md#bili) | `example/bili/plugin.go:47` | `s.RegisterTool(tp+"video", sdk.ToolDef{` |
+| [`bili`](../examples/index.md#bili) | `example/bili/plugin.go:85` | `s.RegisterTool(tp+"video", sdk.ToolDef{` |
 
 <small>`plugin.go:557`</small>
 

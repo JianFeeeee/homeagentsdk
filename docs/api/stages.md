@@ -24,8 +24,8 @@ func (c *StageContext) Lock()
 |---|---|---|
 | [`a2a`](../examples/index.md#a2a) | `example/a2a/plugin.go:158` | `p.sessMu.Lock()` |
 | [`acp`](../examples/index.md#acp) | `example/acp/plugin.go:128` | `p.srvMu.Lock()` |
+| [`bili`](../examples/index.md#bili) | `example/bili/plugin.go:37` | `p.runMu.Lock()` |
 | [`browser`](../examples/index.md#browser) | `example/browser/plugin.go:427` | `p.mu.Lock()` |
-| [`calendar`](../examples/index.md#calendar) | `example/calendar/plugin.go:433` | `p.mu.Lock()` |
 
 <small>`plugin.go:211`</small>
 
@@ -147,8 +147,8 @@ func (c *StageContext) Unlock()
 |---|---|---|
 | [`a2a`](../examples/index.md#a2a) | `example/a2a/plugin.go:164` | `p.sessMu.Unlock()` |
 | [`acp`](../examples/index.md#acp) | `example/acp/plugin.go:129` | `defer p.srvMu.Unlock()` |
+| [`bili`](../examples/index.md#bili) | `example/bili/plugin.go:40` | `p.runMu.Unlock()` |
 | [`browser`](../examples/index.md#browser) | `example/browser/plugin.go:432` | `p.mu.Unlock()` |
-| [`calendar`](../examples/index.md#calendar) | `example/calendar/plugin.go:523` | `p.mu.Unlock()` |
 
 <small>`plugin.go:212`</small>
 

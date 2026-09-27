@@ -20,7 +20,7 @@ SDK 仓 `example/` 下有多个**真实可编译**的示例插件，覆盖工具
 
 ## `bili`
 
-用到的 API：`RegisterTool` · `SetAutoRestart` · `Settings`
+用到的 API：`Lock` · `RegisterTool` · `SetAutoRestart` · `Settings` · `Unlock`
 
 ## `browser`
 
@@ -28,7 +28,7 @@ SDK 仓 `example/` 下有多个**真实可编译**的示例插件，覆盖工具
 
 ## `calendar`
 
-用到的 API：`InjectInterruptTextOpts` · `Lock` · `RLock` · `RUnlock` · `RegisterInputChannel` · `RegisterOnRemoveHandler` · `RegisterStopHandler` · `Unlock`
+用到的 API：`InjectInterruptTextOpts` · `RLock` · `RUnlock` · `RegisterInputChannel` · `RegisterOnRemoveHandler` · `RegisterStopHandler`
 
 ## `deepsearch`
 
