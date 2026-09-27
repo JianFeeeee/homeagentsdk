@@ -33,7 +33,7 @@ for routing the agent's response.
 InjectInputMedia(source, channel, text string, blocks []ContentBlock)
 ```
 
-<small>`plugin.go:230`</small>
+<small>`plugin.go:329`</small>
 
 ### `IOInjector.InjectInputMediaOpts`
 
@@ -41,7 +41,7 @@ InjectInputMedia(source, channel, text string, blocks []ContentBlock)
 InjectInputMediaOpts(source, channel, text string, blocks []ContentBlock, opts InjectOptions)
 ```
 
-<small>`plugin.go:241`</small>
+<small>`plugin.go:340`</small>
 
 ### `IOInjector.InjectInputMediaSync`
 
@@ -49,7 +49,7 @@ InjectInputMediaOpts(source, channel, text string, blocks []ContentBlock, opts I
 InjectInputMediaSync(source, channel, text string, blocks []ContentBlock) string
 ```
 
-<small>`plugin.go:231`</small>
+<small>`plugin.go:330`</small>
 
 ### `IOInjector.InjectInputMediaSyncOpts`
 
@@ -57,7 +57,7 @@ InjectInputMediaSync(source, channel, text string, blocks []ContentBlock) string
 InjectInputMediaSyncOpts(source, channel, text string, blocks []ContentBlock, opts InjectOptions) string
 ```
 
-<small>`plugin.go:242`</small>
+<small>`plugin.go:341`</small>
 
 ### `IOInjector.InjectInputSync`
 
@@ -75,7 +75,7 @@ InjectInputSync 注入输入事件并同步等待 agent 回复，返回回复文
 | [`a2a`](../examples/index.md#a2a) | `example/a2a/plugin.go:345` | `reply := p.sdk.InjectInputSync(p.name, p.name,` |
 | [`acp`](../examples/index.md#acp) | `example/acp/plugin.go:237` | `reply = p.sdk.InjectInputSync(p.name, p.name,` |
 
-<small>`plugin.go:226`</small>
+<small>`plugin.go:325`</small>
 
 ### `IOInjector.InjectInputSyncOpts`
 
@@ -83,7 +83,7 @@ InjectInputSync 注入输入事件并同步等待 agent 回复，返回回复文
 InjectInputSyncOpts(source, channel, text string, opts InjectOptions) string
 ```
 
-<small>`plugin.go:240`</small>
+<small>`plugin.go:339`</small>
 
 ### `IOInjector.InjectInterruptMedia`
 
@@ -91,7 +91,7 @@ InjectInputSyncOpts(source, channel, text string, opts InjectOptions) string
 InjectInterruptMedia(source, channel, text string, blocks []ContentBlock)
 ```
 
-<small>`plugin.go:232`</small>
+<small>`plugin.go:331`</small>
 
 ### `IOInjector.InjectInterruptMediaOpts`
 
@@ -99,7 +99,7 @@ InjectInterruptMedia(source, channel, text string, blocks []ContentBlock)
 InjectInterruptMediaOpts(source, channel, text string, blocks []ContentBlock, opts InjectOptions)
 ```
 
-<small>`plugin.go:243`</small>
+<small>`plugin.go:342`</small>
 
 ### `IOInjector.InjectInterruptText`
 
@@ -107,7 +107,7 @@ InjectInterruptMediaOpts(source, channel, text string, blocks []ContentBlock, op
 InjectInterruptText(source, channel, text string)
 ```
 
-<small>`plugin.go:221`</small>
+<small>`plugin.go:320`</small>
 
 ### `IOInjector.InjectInterruptTextOpts`
 
@@ -124,7 +124,7 @@ InjectInterruptTextOpts(source, channel, text string, opts InjectOptions)
 | [`memo`](../examples/index.md#memo) | `example/memo/plugin.go:299` | `p.sdk.InjectInterruptTextOpts(p.name, p.name,` |
 | [`qq`](../examples/index.md#qq) | `example/qq/plugin.go:1493` | `p.sdk.InjectInterruptTextOpts(p.name, p.name, text, sdk.InjectOptions{` |
 
-<small>`plugin.go:239`</small>
+<small>`plugin.go:338`</small>
 
 ### `IOInjector.InjectText`
 
@@ -132,7 +132,7 @@ InjectInterruptTextOpts(source, channel, text string, opts InjectOptions)
 InjectText(source, channel, text string)
 ```
 
-<small>`plugin.go:222`</small>
+<small>`plugin.go:321`</small>
 
 ### `IOInjector.InjectTextNoMemory`
 
@@ -146,7 +146,7 @@ InjectTextNoMemory(source, channel, text string)
 |---|---|---|
 | [`browser`](../examples/index.md#browser) | `example/browser/plugin.go:1114` | `p.sdk.InjectTextNoMemory(p.name, p.name, fmt.Sprintf("[浏览器 %s 已导航到 %s]", id, rawURL))` |
 
-<small>`plugin.go:223`</small>
+<small>`plugin.go:322`</small>
 
 ### `IOInjector.InjectTextOpts`
 
@@ -159,7 +159,7 @@ InjectTextOpts(source, channel, text string, opts InjectOptions)
 上面那些不带 opts 的方法等价于传零值 InjectOptions（记入记忆 + 不裁剪），
 保留它们是为了不破坏已有插件；新代码应当用 Opts 变体把意图写清楚。
 
-<small>`plugin.go:238`</small>
+<small>`plugin.go:337`</small>
 
 ### `IOInjector.SetToolBlocks`
 
@@ -170,7 +170,7 @@ SetToolBlocks(blocks []ContentBlock)
 SetToolBlocks 插件工具注入多模态内容块（image_url/audio_url），内核在下一条
 tool message 的 content 数组里带上这些块，让模型在后续轮次看到图/听到音频。
 
-<small>`plugin.go:229`</small>
+<small>`plugin.go:328`</small>
 
 ### `CapAudio`
 
@@ -180,7 +180,7 @@ const CapAudio
 
 Output capability flags
 
-<small>`plugin.go:331`</small>
+<small>`plugin.go:430`</small>
 
 ### `CapFile`
 
@@ -190,7 +190,7 @@ const CapFile
 
 Output capability flags
 
-<small>`plugin.go:329`</small>
+<small>`plugin.go:428`</small>
 
 ### `CapImage`
 
@@ -200,7 +200,7 @@ const CapImage
 
 Output capability flags
 
-<small>`plugin.go:330`</small>
+<small>`plugin.go:429`</small>
 
 ### `CapStructured`
 
@@ -210,7 +210,7 @@ const CapStructured
 
 Output capability flags
 
-<small>`plugin.go:332`</small>
+<small>`plugin.go:431`</small>
 
 ### `CapText`
 
@@ -220,7 +220,7 @@ const CapText
 
 Output capability flags
 
-<small>`plugin.go:328`</small>
+<small>`plugin.go:427`</small>
 
 ### `ChannelDef`
 
@@ -233,12 +233,13 @@ NoMemory: 此通道输入/输出不参与记忆计算（向量化/关键词提�
 Cleaner:  计算层过滤函数，不改原文；仅在向量化/jieba/蒸馏/存档提取关键词时调用
 ContextPolicy: 此通道的输入到达后是否据此裁剪上下文，默认 none（不裁剪）
 RecallPolicy:  此通道的输入到达后是否据此召回相关记忆，默认 auto（召回）
+ScenePolicy:   此通道的输入到达后是否参与场面识别（场景式记忆），默认 auto（参与）
 
 JSON tag 是必需的：通道定义要跨进程传给内核，而 Cleaner 是函数（必须忽略）。
 没有 tag 时既无法整体 marshal（func 不支持），又会诱使调用方手写字段白名单——
 那样新增字段会被静默丢掉。
 
-<small>`plugin.go:139`</small>
+<small>`plugin.go:178`</small>
 
 ### `ContextPolicyNone`
 
@@ -280,7 +281,7 @@ blocks 会落进媒体存储被记忆引用捕获，同时作为当前轮 conten
 的「下一轮 tool message」语义。
 等价于 InjectInputMediaOpts(..., InjectOptions{})。
 
-<small>`plugin.go:706`</small>
+<small>`plugin.go:805`</small>
 
 ### `PluginSDK.InjectInputMediaOpts`
 
@@ -290,7 +291,7 @@ func (s *PluginSDK) InjectInputMediaOpts(source, channel, text string, blocks []
 
 InjectInputMediaOpts 注入带媒体块的输入，并声明记忆/裁剪行为。
 
-<small>`plugin.go:745`</small>
+<small>`plugin.go:844`</small>
 
 ### `PluginSDK.InjectInputMediaSync`
 
@@ -301,7 +302,7 @@ func (s *PluginSDK) InjectInputMediaSync(source, channel, text string, blocks []
 InjectInputMediaSync 注入带媒体内容块的输入并同步等待 agent 回复。
 等价于 InjectInputMediaSyncOpts(..., InjectOptions{})。
 
-<small>`plugin.go:712`</small>
+<small>`plugin.go:811`</small>
 
 ### `PluginSDK.InjectInputMediaSyncOpts`
 
@@ -311,7 +312,7 @@ func (s *PluginSDK) InjectInputMediaSyncOpts(source, channel, text string, block
 
 InjectInputMediaSyncOpts 注入带媒体块的输入并同步等待回复，同时声明记忆/裁剪行为。
 
-<small>`plugin.go:752`</small>
+<small>`plugin.go:851`</small>
 
 ### `PluginSDK.InjectInputSync`
 
@@ -330,7 +331,7 @@ to the source channel by the caller.
 | [`a2a`](../examples/index.md#a2a) | `example/a2a/plugin.go:345` | `reply := p.sdk.InjectInputSync(p.name, p.name,` |
 | [`acp`](../examples/index.md#acp) | `example/acp/plugin.go:237` | `reply = p.sdk.InjectInputSync(p.name, p.name,` |
 
-<small>`plugin.go:697`</small>
+<small>`plugin.go:796`</small>
 
 ### `PluginSDK.InjectInputSyncOpts`
 
@@ -340,7 +341,7 @@ func (s *PluginSDK) InjectInputSyncOpts(source, channel, text string, opts Injec
 
 InjectInputSyncOpts 注入输入并同步等待回复，同时在这次注入上声明记忆/裁剪行为。
 
-<small>`plugin.go:736`</small>
+<small>`plugin.go:835`</small>
 
 ### `PluginSDK.InjectInterruptMedia`
 
@@ -351,7 +352,7 @@ func (s *PluginSDK) InjectInterruptMedia(source, channel, text string, blocks []
 InjectInterruptMedia 注入带媒体内容块的中断，可抢占当前 LLM 处理。
 blocks 随中断消息一起发给模型。
 
-<small>`plugin.go:769`</small>
+<small>`plugin.go:868`</small>
 
 ### `PluginSDK.InjectInterruptMediaOpts`
 
@@ -361,7 +362,7 @@ func (s *PluginSDK) InjectInterruptMediaOpts(source, channel, text string, block
 
 InjectInterruptMediaOpts 注入带媒体块的中断，并声明记忆/裁剪行为。
 
-<small>`plugin.go:761`</small>
+<small>`plugin.go:860`</small>
 
 ### `PluginSDK.InjectInterruptText`
 
@@ -372,7 +373,7 @@ func (s *PluginSDK) InjectInterruptText(source, channel, text string)
 InjectInterruptText injects a text interrupt that can preempt current LLM processing.
 等价于 InjectInterruptTextOpts(..., InjectOptions{})：记入记忆、不裁剪。
 
-<small>`plugin.go:678`</small>
+<small>`plugin.go:777`</small>
 
 ### `PluginSDK.InjectInterruptTextOpts`
 
@@ -394,7 +395,7 @@ InjectInterruptTextOpts 注入可抢占当前处理的中断文本。
 | [`memo`](../examples/index.md#memo) | `example/memo/plugin.go:299` | `p.sdk.InjectInterruptTextOpts(p.name, p.name,` |
 | [`qq`](../examples/index.md#qq) | `example/qq/plugin.go:1493` | `p.sdk.InjectInterruptTextOpts(p.name, p.name, text, sdk.InjectOptions{` |
 
-<small>`plugin.go:729`</small>
+<small>`plugin.go:828`</small>
 
 ### `InjectOptions`
 
@@ -424,7 +425,7 @@ CleanerName:    此次注入的内容用哪个**已注册的通道 cleaner** 清
 	而注入内容往往带 ANSI/JSON 包装，需要清洗后才是有效内容；
 	不指定就只能退到「按 source 查不到就不清洗」。
 
-<small>`plugin.go:98`</small>
+<small>`plugin.go:132`</small>
 
 ### `PluginSDK.InjectText`
 
@@ -435,7 +436,7 @@ func (s *PluginSDK) InjectText(source, channel, text string)
 InjectText injects a text message into the agent pipeline.
 等价于 InjectTextOpts(..., InjectOptions{})：记入记忆、不裁剪。
 
-<small>`plugin.go:684`</small>
+<small>`plugin.go:783`</small>
 
 ### `PluginSDK.InjectTextNoMemory`
 
@@ -452,7 +453,7 @@ InjectTextNoMemory injects a text message without generating memory.
 |---|---|---|
 | [`browser`](../examples/index.md#browser) | `example/browser/plugin.go:1114` | `p.sdk.InjectTextNoMemory(p.name, p.name, fmt.Sprintf("[浏览器 %s 已导航到 %s]", id, rawURL))` |
 
-<small>`plugin.go:690`</small>
+<small>`plugin.go:789`</small>
 
 ### `PluginSDK.InjectTextOpts`
 
@@ -462,7 +463,7 @@ func (s *PluginSDK) InjectTextOpts(source, channel, text string, opts InjectOpti
 
 InjectTextOpts 注入文本到 agent，并在这一次注入上声明记忆与裁剪行为。
 
-<small>`plugin.go:719`</small>
+<small>`plugin.go:818`</small>
 
 ### `PriorityL1`
 
@@ -476,7 +477,7 @@ L1..L3 任何插件都可声明；**L4 只有内核级插件**（编译期内置
 如 cli/webui/timer）才能声明——它用于实现真正的“立即打断”能力，
 例如 WebUI 的终止按钮。外部插件（走 proc 桥）声明 L4 会被内核夹到 L3。
 
-<small>`plugin.go:123`</small>
+<small>`plugin.go:161`</small>
 
 ### `PriorityL2`
 
@@ -490,7 +491,7 @@ L1..L3 任何插件都可声明；**L4 只有内核级插件**（编译期内置
 如 cli/webui/timer）才能声明——它用于实现真正的“立即打断”能力，
 例如 WebUI 的终止按钮。外部插件（走 proc 桥）声明 L4 会被内核夹到 L3。
 
-<small>`plugin.go:124`</small>
+<small>`plugin.go:162`</small>
 
 ### `PriorityL3`
 
@@ -504,7 +505,7 @@ L1..L3 任何插件都可声明；**L4 只有内核级插件**（编译期内置
 如 cli/webui/timer）才能声明——它用于实现真正的“立即打断”能力，
 例如 WebUI 的终止按钮。外部插件（走 proc 桥）声明 L4 会被内核夹到 L3。
 
-<small>`plugin.go:125`</small>
+<small>`plugin.go:163`</small>
 
 ### `PriorityL4`
 
@@ -517,7 +518,7 @@ const PriorityL4
 
 PriorityL4 仅内核级（内置）插件可用；外部插件声明会被夹到 L3。
 
-<small>`plugin.go:127`</small>
+<small>`plugin.go:165`</small>
 
 ### `RecallPolicyAuto`
 
@@ -577,7 +578,7 @@ def.Cleaner:  计算层对输入文本清洗后（不改原文）再向量化/�
 | [`browser`](../examples/index.md#browser) | `example/browser/plugin.go:209` | `_ = s.RegisterInputChannel(p.name, sdk.ChannelDef{})` |
 | [`calendar`](../examples/index.md#calendar) | `example/calendar/plugin.go:281` | `_ = s.RegisterInputChannel("calendar", sdk.ChannelDef{NoMemory: true})` |
 
-<small>`plugin.go:566`</small>
+<small>`plugin.go:665`</small>
 
 ### `PluginSDK.RegisterOutputChannel`
 
@@ -614,7 +615,7 @@ handler: receives args map with keys: payload (string), type (string), meta (str
 | [`qq`](../examples/index.md#qq) | `example/qq/plugin.go:411` | `s.RegisterOutputChannel("qq", sdk.CapText\|sdk.CapFile\|sdk.CapImage\|sdk.CapAudio,` |
 | [`weather`](../examples/index.md#weather) | `example/weather/plugin.go:104` | `if err := s.RegisterOutputChannel(tp+"weather_out", 0, "push weather to user", sdk.ChannelDef{` |
 
-<small>`plugin.go:533`</small>
+<small>`plugin.go:632`</small>
 
 ### `PluginSDK.SetToolBlocks`
 
@@ -625,7 +626,7 @@ func (s *PluginSDK) SetToolBlocks(blocks []ContentBlock)
 SetToolBlocks 在工具处理函数内注入多模态内容块，内核在下一条 tool message
 的 content 数组里带上它们。需要「本轮就让模型看到」时用 InjectInputMedia。
 
-<small>`plugin.go:777`</small>
+<small>`plugin.go:876`</small>
 
 ### `ValidContextPolicy`
 

@@ -10,7 +10,7 @@
 func (c *StageContext) IsResponded() bool
 ```
 
-<small>`plugin.go:172`</small>
+<small>`plugin.go:213`</small>
 
 ### `StageContext.Lock`
 
@@ -27,7 +27,7 @@ func (c *StageContext) Lock()
 | [`browser`](../examples/index.md#browser) | `example/browser/plugin.go:427` | `p.mu.Lock()` |
 | [`calendar`](../examples/index.md#calendar) | `example/calendar/plugin.go:433` | `p.mu.Lock()` |
 
-<small>`plugin.go:170`</small>
+<small>`plugin.go:211`</small>
 
 ### `StageContext.RLock`
 
@@ -44,7 +44,7 @@ func (c *StageContext) RLock()
 | [`memo`](../examples/index.md#memo) | `example/memo/plugin.go:224` | `p.mu.RLock()` |
 | [`qq`](../examples/index.md#qq) | `example/qq/plugin.go:1152` | `ctx.RLock()` |
 
-<small>`plugin.go:168`</small>
+<small>`plugin.go:209`</small>
 
 ### `StageContext.RUnlock`
 
@@ -61,7 +61,7 @@ func (c *StageContext) RUnlock()
 | [`memo`](../examples/index.md#memo) | `example/memo/plugin.go:229` | `p.mu.RUnlock()` |
 | [`qq`](../examples/index.md#qq) | `example/qq/plugin.go:1155` | `ctx.RUnlock()` |
 
-<small>`plugin.go:169`</small>
+<small>`plugin.go:210`</small>
 
 ### `PluginSDK.RegisterStage`
 
@@ -83,7 +83,7 @@ RegisterStage registers a handler for a pipeline stage.
 | [`sanitizer`](../examples/index.md#sanitizer) | `example/sanitizer/plugin.go:52` | `s.RegisterStage(sdk.StageOnInput, func(ctx *sdk.StageContext) error {` |
 | [`weather`](../examples/index.md#weather) | `example/weather/plugin.go:94` | `s.RegisterStage(sdk.StageAfterToolcall, func(ctx *sdk.StageContext) error {` |
 
-<small>`plugin.go:472`</small>
+<small>`plugin.go:571`</small>
 
 ### `Stage`
 
@@ -103,7 +103,7 @@ type StageContext struct { mu sync.RWMutex RawMessage string UserID string Group
 
 StageContext provides context for stage handlers.
 
-<small>`plugin.go:148`</small>
+<small>`plugin.go:189`</small>
 
 ### `StageHandler`
 
@@ -123,7 +123,7 @@ type StageRegistrar func(stage Stage, handler StageHandler)
 
 StageRegistrar registers a stage handler.
 
-<small>`plugin.go:308`</small>
+<small>`plugin.go:407`</small>
 
 ### `StageScope`
 
@@ -133,7 +133,7 @@ type StageScope int
 
 StageScope controls which events a stage handler receives.
 
-<small>`plugin.go:294`</small>
+<small>`plugin.go:393`</small>
 
 ### `StageContext.Unlock`
 
@@ -150,5 +150,5 @@ func (c *StageContext) Unlock()
 | [`browser`](../examples/index.md#browser) | `example/browser/plugin.go:432` | `p.mu.Unlock()` |
 | [`calendar`](../examples/index.md#calendar) | `example/calendar/plugin.go:523` | `p.mu.Unlock()` |
 
-<small>`plugin.go:171`</small>
+<small>`plugin.go:212`</small>
 

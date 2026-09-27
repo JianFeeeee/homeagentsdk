@@ -79,7 +79,7 @@ controls which events are delivered.
 Subscribe(eventType EventType, handler EventHandler) func()
 ```
 
-<small>`plugin.go:279`</small>
+<small>`plugin.go:378`</small>
 
 ## `IOInjector`
 
@@ -110,7 +110,7 @@ for routing the agent's response.
 InjectInputMedia(source, channel, text string, blocks []ContentBlock)
 ```
 
-<small>`plugin.go:230`</small>
+<small>`plugin.go:329`</small>
 
 ### `IOInjector.InjectInputMediaOpts`
 
@@ -118,7 +118,7 @@ InjectInputMedia(source, channel, text string, blocks []ContentBlock)
 InjectInputMediaOpts(source, channel, text string, blocks []ContentBlock, opts InjectOptions)
 ```
 
-<small>`plugin.go:241`</small>
+<small>`plugin.go:340`</small>
 
 ### `IOInjector.InjectInputMediaSync`
 
@@ -126,7 +126,7 @@ InjectInputMediaOpts(source, channel, text string, blocks []ContentBlock, opts I
 InjectInputMediaSync(source, channel, text string, blocks []ContentBlock) string
 ```
 
-<small>`plugin.go:231`</small>
+<small>`plugin.go:330`</small>
 
 ### `IOInjector.InjectInputMediaSyncOpts`
 
@@ -134,7 +134,7 @@ InjectInputMediaSync(source, channel, text string, blocks []ContentBlock) string
 InjectInputMediaSyncOpts(source, channel, text string, blocks []ContentBlock, opts InjectOptions) string
 ```
 
-<small>`plugin.go:242`</small>
+<small>`plugin.go:341`</small>
 
 ### `IOInjector.InjectInputSync`
 
@@ -152,7 +152,7 @@ InjectInputSync 注入输入事件并同步等待 agent 回复，返回回复文
 | [`a2a`](../examples/index.md#a2a) | `example/a2a/plugin.go:345` | `reply := p.sdk.InjectInputSync(p.name, p.name,` |
 | [`acp`](../examples/index.md#acp) | `example/acp/plugin.go:237` | `reply = p.sdk.InjectInputSync(p.name, p.name,` |
 
-<small>`plugin.go:226`</small>
+<small>`plugin.go:325`</small>
 
 ### `IOInjector.InjectInputSyncOpts`
 
@@ -160,7 +160,7 @@ InjectInputSync 注入输入事件并同步等待 agent 回复，返回回复文
 InjectInputSyncOpts(source, channel, text string, opts InjectOptions) string
 ```
 
-<small>`plugin.go:240`</small>
+<small>`plugin.go:339`</small>
 
 ### `IOInjector.InjectInterruptMedia`
 
@@ -168,7 +168,7 @@ InjectInputSyncOpts(source, channel, text string, opts InjectOptions) string
 InjectInterruptMedia(source, channel, text string, blocks []ContentBlock)
 ```
 
-<small>`plugin.go:232`</small>
+<small>`plugin.go:331`</small>
 
 ### `IOInjector.InjectInterruptMediaOpts`
 
@@ -176,7 +176,7 @@ InjectInterruptMedia(source, channel, text string, blocks []ContentBlock)
 InjectInterruptMediaOpts(source, channel, text string, blocks []ContentBlock, opts InjectOptions)
 ```
 
-<small>`plugin.go:243`</small>
+<small>`plugin.go:342`</small>
 
 ### `IOInjector.InjectInterruptText`
 
@@ -184,7 +184,7 @@ InjectInterruptMediaOpts(source, channel, text string, blocks []ContentBlock, op
 InjectInterruptText(source, channel, text string)
 ```
 
-<small>`plugin.go:221`</small>
+<small>`plugin.go:320`</small>
 
 ### `IOInjector.InjectInterruptTextOpts`
 
@@ -201,7 +201,7 @@ InjectInterruptTextOpts(source, channel, text string, opts InjectOptions)
 | [`memo`](../examples/index.md#memo) | `example/memo/plugin.go:299` | `p.sdk.InjectInterruptTextOpts(p.name, p.name,` |
 | [`qq`](../examples/index.md#qq) | `example/qq/plugin.go:1493` | `p.sdk.InjectInterruptTextOpts(p.name, p.name, text, sdk.InjectOptions{` |
 
-<small>`plugin.go:239`</small>
+<small>`plugin.go:338`</small>
 
 ### `IOInjector.InjectText`
 
@@ -209,7 +209,7 @@ InjectInterruptTextOpts(source, channel, text string, opts InjectOptions)
 InjectText(source, channel, text string)
 ```
 
-<small>`plugin.go:222`</small>
+<small>`plugin.go:321`</small>
 
 ### `IOInjector.InjectTextNoMemory`
 
@@ -223,7 +223,7 @@ InjectTextNoMemory(source, channel, text string)
 |---|---|---|
 | [`browser`](../examples/index.md#browser) | `example/browser/plugin.go:1114` | `p.sdk.InjectTextNoMemory(p.name, p.name, fmt.Sprintf("[浏览器 %s 已导航到 %s]", id, rawURL))` |
 
-<small>`plugin.go:223`</small>
+<small>`plugin.go:322`</small>
 
 ### `IOInjector.InjectTextOpts`
 
@@ -236,7 +236,7 @@ InjectTextOpts(source, channel, text string, opts InjectOptions)
 上面那些不带 opts 的方法等价于传零值 InjectOptions（记入记忆 + 不裁剪），
 保留它们是为了不破坏已有插件；新代码应当用 Opts 变体把意图写清楚。
 
-<small>`plugin.go:238`</small>
+<small>`plugin.go:337`</small>
 
 ### `IOInjector.SetToolBlocks`
 
@@ -247,7 +247,7 @@ SetToolBlocks(blocks []ContentBlock)
 SetToolBlocks 插件工具注入多模态内容块（image_url/audio_url），内核在下一条
 tool message 的 content 数组里带上这些块，让模型在后续轮次看到图/听到音频。
 
-<small>`plugin.go:229`</small>
+<small>`plugin.go:328`</small>
 
 ## `KnowledgeAPI`
 
@@ -422,7 +422,7 @@ IsPluginDisabled(name string) bool
 
 IsPluginDisabled 查询插件是否被禁用。
 
-<small>`plugin.go:290`</small>
+<small>`plugin.go:389`</small>
 
 ### `PluginMgrAPI.ListLoadedPlugins`
 
@@ -432,7 +432,7 @@ ListLoadedPlugins() []string
 
 ListLoadedPlugins 列出已加载插件。
 
-<small>`plugin.go:288`</small>
+<small>`plugin.go:387`</small>
 
 ### `PluginMgrAPI.ReloadOne`
 
@@ -442,7 +442,7 @@ ReloadOne(name string) error
 
 ReloadOne 重载单个插件（停止后重新加载）。
 
-<small>`plugin.go:286`</small>
+<small>`plugin.go:385`</small>
 
 ## `SettingsAPI`
 
@@ -680,7 +680,7 @@ Append(evt TextEvent) error
 type AudioURL struct { URL string `json:"url"` }
 ```
 
-<small>`plugin.go:867`</small>
+<small>`plugin.go:966`</small>
 
 ### `EffectiveProxyAuth`
 
@@ -692,13 +692,32 @@ EffectiveProxyAuth 返回生效的鉴权模式（空串归一化为 ProxyAuthHom
 
 <small>`proxy.go:169`</small>
 
+### `ToolError.Error`
+
+```go
+func (e *ToolError) Error() string
+```
+
+Error 实现 error，便于工具同时走 (ToolError, error) 通道。
+
+**示例插件里的真实用法**
+
+| 插件 | 位置 | 代码 |
+|---|---|---|
+| [`a2a`](../examples/index.md#a2a) | `example/a2a/plugin.go:317` | `http.Error(w, "query/message.text required", http.StatusBadRequest)` |
+| [`acp`](../examples/index.md#acp) | `example/acp/plugin.go:175` | `http.Error(w, "", http.StatusMethodNotAllowed)` |
+| [`ai_image`](../examples/index.md#ai_image) | `example/ai_image/plugin.go:259` | `return map[string]interface{}{"isError": true, "content": "Request failed: " + err.Error()}, nil` |
+| [`browser`](../examples/index.md#browser) | `example/browser/plugin_test.go:15` | `if err == nil \|\| !strings.Contains(err.Error(), "timeout is required") {` |
+
+<small>`plugin.go:264`</small>
+
 ### `ImageURL`
 
 ```go
 type ImageURL struct { URL string `json:"url"` Detail string `json:"detail,omitempty"` }
 ```
 
-<small>`plugin.go:862`</small>
+<small>`plugin.go:961`</small>
 
 ### `MemItem`
 
@@ -708,7 +727,7 @@ type MemItem struct { Role string `json:"role"` Content string `json:"content"` 
 
 MemItem represents a memory item in stage context.
 
-<small>`plugin.go:179`</small>
+<small>`plugin.go:220`</small>
 
 ### `NormalizeProxyHost`
 
@@ -732,7 +751,7 @@ type PluginSDK struct { name string regTool ToolRegistrar regStage StageRegistra
 PluginSDK is the main API surface provided to plugins at runtime.
 It wraps tool registration, settings, memory, knowledge, LLM, and IO injection.
 
-<small>`plugin.go:337`</small>
+<small>`plugin.go:436`</small>
 
 ### `ProxyAuthHomeAgent`
 
@@ -877,6 +896,64 @@ SDKVersion 是对外暴露的 SDK 版本号。
 
 <small>`plugin.go:10`</small>
 
+### `ScenePolicyAuto`
+
+```go
+const ScenePolicyAuto
+```
+
+场面策略：决定一次输入是否参与**场面识别**（场景式记忆）。
+
+与前两项再正交一轴：NoMemory 管「进不进记忆计算」、ContextPolicy 管
+「裁不裁上下文」、RecallPolicy 管「召不召回记忆」，本项管的是
+「这条输入算不算一场戏的一部分」——它决定输入会不会产出现场指纹
+（通道/对话对象/工具/话题/时段），进而决定会不会长出、命中、写入场景。
+
+默认（空串或 ScenePolicyAuto）**参与**，保持既有行为：场景式记忆自
+v1.3 落地起就对所有通道无条件生效，没有开关。不默认关有两个原因：
+ 1. 场景只**附加**现有记忆的检索路，不改记忆本体，默认关会让存量
+    通道突然失去场景召回；
+ 2. 「关」是少数意图（内部信噪通道），少数意图不该是默认——
+    与 ContextPolicy 刻意相反（同为破坏性操作，那里是默认关）。
+
+该关的典型是纯内部通道：system（内核自循环）、kernel、timer、healthcheck。
+但**现网不标任何一个**（2026-09-26 裁定）：实测这些 0-refs 通道合计 70
+strength、0 条记忆，场景召回返回空；而 declared 场景不进相似度空间
+（loadEmergentScenesLocked 只取 origin='emergent'），多写对聚类零影响。
+「多写无影响、少写会缺场景」——默认 auto 保持开，声明项只作为插件
+将来确实需要时的闸门。
+
+<small>`plugin.go:98`</small>
+
+### `ScenePolicyNone`
+
+```go
+const ScenePolicyNone
+```
+
+场面策略：决定一次输入是否参与**场面识别**（场景式记忆）。
+
+与前两项再正交一轴：NoMemory 管「进不进记忆计算」、ContextPolicy 管
+「裁不裁上下文」、RecallPolicy 管「召不召回记忆」，本项管的是
+「这条输入算不算一场戏的一部分」——它决定输入会不会产出现场指纹
+（通道/对话对象/工具/话题/时段），进而决定会不会长出、命中、写入场景。
+
+默认（空串或 ScenePolicyAuto）**参与**，保持既有行为：场景式记忆自
+v1.3 落地起就对所有通道无条件生效，没有开关。不默认关有两个原因：
+ 1. 场景只**附加**现有记忆的检索路，不改记忆本体，默认关会让存量
+    通道突然失去场景召回；
+ 2. 「关」是少数意图（内部信噪通道），少数意图不该是默认——
+    与 ContextPolicy 刻意相反（同为破坏性操作，那里是默认关）。
+
+该关的典型是纯内部通道：system（内核自循环）、kernel、timer、healthcheck。
+但**现网不标任何一个**（2026-09-26 裁定）：实测这些 0-refs 通道合计 70
+strength、0 条记忆，场景召回返回空；而 declared 场景不进相似度空间
+（loadEmergentScenesLocked 只取 origin='emergent'），多写对聚类零影响。
+「多写无影响、少写会缺场景」——默认 auto 保持开，声明项只作为插件
+将来确实需要时的闸门。
+
+<small>`plugin.go:99`</small>
+
 ### `PluginSDK.SetProxyRegistrar`
 
 ```go
@@ -886,6 +963,24 @@ func (s *PluginSDK) SetProxyRegistrar(r ProxyRegistrar)
 SetProxyRegistrar 由内核注入。插件不直接调它（与 SetInputChannelRegistrar 同族）。
 
 <small>`proxy.go:309`</small>
+
+### `ToolError`
+
+```go
+type ToolError struct { // Field 是出错的参数字段名（参数校验失败时填）。 Field string `json:"field,omitempty"` // Reason 是机器可读的原因码： …
+```
+
+ToolError 描述一次工具调用的失败原因。
+
+存在的理由：失败若只表达为文本，模型无法定位到字段，只能原样重试
+（实测 cmd_run 失败率 34%~48%，全部源于同一个成因：参数被截断或
+JSON 写坏，工具却只回报 "command is required" 这类与真因无关的错）。
+
+⚠️ 零值语义：插件**不必**改用本类型。内核的失败识别同时兼容既有三种约定
+（{"error":…}、{"isError":true,…}、显式 error 返回），见 core.isToolError。
+本类型是给**新写**的工具用的可选项，不是迁移要求。
+
+<small>`plugin.go:252`</small>
 
 ### `PluginSDK.UnregisterOutputChannel`
 
@@ -898,7 +993,7 @@ func (s *PluginSDK) UnregisterOutputChannel(name string) error
 
 UnregisterOutputChannel 注销一个输出通道（动态通道随资源生灭时必须调用）。
 
-<small>`plugin.go:544`</small>
+<small>`plugin.go:643`</small>
 
 ### `ValidProxyAuth`
 
@@ -922,6 +1017,16 @@ ValidProxyHostLabel 校验子域名标签是否合法（DNS label 规则）。
 都要用同一套规则判定，避免三处各写一份而互相不一致。
 
 <small>`proxy.go:180`</small>
+
+### `ValidScenePolicy`
+
+```go
+func ValidScenePolicy(policy string) bool
+```
+
+ValidScenePolicy 校验场面策略取值；空串等价于 ScenePolicyAuto。
+
+<small>`plugin.go:103`</small>
 
 ### `ValidateProxyDef`
 

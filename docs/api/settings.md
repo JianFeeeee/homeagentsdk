@@ -193,5 +193,5 @@ sett 在 New 时一次性写入且无 setter，故不需要加锁。
 | [`ai_image`](../examples/index.md#ai_image) | `example/ai_image/plugin.go:114` | `s.Settings().RegisterDef(sdk.ConfigDef{` |
 | [`bili`](../examples/index.md#bili) | `example/bili/plugin.go:29` | `s.Settings().RegisterDef(sdk.ConfigDef{` |
 
-<small>`plugin.go:406`</small>
+<small>`plugin.go:505`</small>
 

@@ -8,15 +8,15 @@ SDK 仓 `example/` 下有多个**真实可编译**的示例插件，覆盖工具
 
 ## `a2a`
 
-用到的 API：`InjectInputSync` · `Lock` · `RegisterInputChannel` · `RegisterOutputChannel` · `RegisterTool` · `SetAutoRestart` · `Settings` · `Unlock`
+用到的 API：`Error` · `InjectInputSync` · `Lock` · `RegisterInputChannel` · `RegisterOutputChannel` · `RegisterTool` · `SetAutoRestart` · `Settings` · `Unlock`
 
 ## `acp`
 
-用到的 API：`InjectInputSync` · `Lock` · `RLock` · `RUnlock` · `RegisterInputChannel` · `RegisterOutputChannel` · `RegisterTool` · `SetAutoRestart` · `Settings` · `Unlock`
+用到的 API：`Error` · `InjectInputSync` · `Lock` · `RLock` · `RUnlock` · `RegisterInputChannel` · `RegisterOutputChannel` · `RegisterTool` · `SetAutoRestart` · `Settings` · `Unlock`
 
 ## `ai_image`
 
-用到的 API：`RegisterTool` · `SetAutoRestart` · `Settings`
+用到的 API：`Error` · `RegisterTool` · `SetAutoRestart` · `Settings`
 
 ## `bili`
 
@@ -24,7 +24,7 @@ SDK 仓 `example/` 下有多个**真实可编译**的示例插件，覆盖工具
 
 ## `browser`
 
-用到的 API：`InjectInterruptTextOpts` · `InjectTextNoMemory` · `Lock` · `RegisterInputChannel` · `Unlock`
+用到的 API：`Error` · `InjectInterruptTextOpts` · `InjectTextNoMemory` · `Lock` · `RegisterInputChannel` · `Unlock`
 
 ## `calendar`
 

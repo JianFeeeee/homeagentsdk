@@ -120,6 +120,7 @@ nav:
       - 仅内置插件可用: api/builtin-only.md
   - 指南:
       - 能力边界（哪些 API 外部可用）: guide/capability-boundary.md
+      - 场景记忆（按场合召回）: guide/scene-memory.md
       - 打包与发布: guide/packaging.md
       - 多平台构建: guide/multi-platform.md
       - 受限 SDK 与安全: guide/security.md

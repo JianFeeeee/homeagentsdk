@@ -74,6 +74,40 @@ func ValidRecallPolicy(policy string) bool {
 	return false
 }
 
+// 场面策略：决定一次输入是否参与**场面识别**（场景式记忆）。
+//
+// 与前两项再正交一轴：NoMemory 管「进不进记忆计算」、ContextPolicy 管
+// 「裁不裁上下文」、RecallPolicy 管「召不召回记忆」，本项管的是
+// 「这条输入算不算一场戏的一部分」——它决定输入会不会产出现场指纹
+// （通道/对话对象/工具/话题/时段），进而决定会不会长出、命中、写入场景。
+//
+// 默认（空串或 ScenePolicyAuto）**参与**，保持既有行为：场景式记忆自
+// v1.3 落地起就对所有通道无条件生效，没有开关。不默认关有两个原因：
+//  1. 场景只**附加**现有记忆的检索路，不改记忆本体，默认关会让存量
+//     通道突然失去场景召回；
+//  2. 「关」是少数意图（内部信噪通道），少数意图不该是默认——
+//     与 ContextPolicy 刻意相反（同为破坏性操作，那里是默认关）。
+//
+// 该关的典型是纯内部通道：system（内核自循环）、kernel、timer、healthcheck。
+// 但**现网不标任何一个**（2026-09-26 裁定）：实测这些 0-refs 通道合计 70
+// strength、0 条记忆，场景召回返回空；而 declared 场景不进相似度空间
+// （loadEmergentScenesLocked 只取 origin='emergent'），多写对聚类零影响。
+// 「多写无影响、少写会缺场景」——默认 auto 保持开，声明项只作为插件
+// 将来确实需要时的闸门。
+const (
+	ScenePolicyAuto = "auto"
+	ScenePolicyNone = "none"
+)
+
+// ValidScenePolicy 校验场面策略取值；空串等价于 ScenePolicyAuto。
+func ValidScenePolicy(policy string) bool {
+	switch policy {
+	case "", ScenePolicyAuto, ScenePolicyNone:
+		return true
+	}
+	return false
+}
+
 // InjectOptions 声明一次注入行为在记忆层与上下文层的表现。
 //
 // 零值 = 记入记忆 + 不裁剪上下文，与历史行为（三参数注入方法）完全一致，
@@ -102,7 +136,11 @@ type InjectOptions struct {
 	// 空串 = 默认（输入/注入 auto，即保持既有「每条输入都召回」的行为）；
 	// RecallPolicyNone 显式关闭（如中断通知的 meta 文本不该据它召回）。
 	RecallPolicy string
-	CleanerName  string
+	// ScenePolicy 声明此次注入是否参与场面识别（场景式记忆）。
+	// 空串 = 默认参与（保持既有行为）；ScenePolicyNone 显式关闭，
+	// 适用于不产生任何场面指纹的纯内部信号（心跳、自循环、内部状态）。
+	ScenePolicy string
+	CleanerName string
 
 	// Priority 声明**中断注入**的优先级（仅 InjectInterrupt* 有意义）。
 	//
@@ -132,6 +170,7 @@ const (
 // Cleaner:  计算层过滤函数，不改原文；仅在向量化/jieba/蒸馏/存档提取关键词时调用
 // ContextPolicy: 此通道的输入到达后是否据此裁剪上下文，默认 none（不裁剪）
 // RecallPolicy:  此通道的输入到达后是否据此召回相关记忆，默认 auto（召回）
+// ScenePolicy:   此通道的输入到达后是否参与场面识别（场景式记忆），默认 auto（参与）
 //
 // JSON tag 是必需的：通道定义要跨进程传给内核，而 Cleaner 是函数（必须忽略）。
 // 没有 tag 时既无法整体 marshal（func 不支持），又会诱使调用方手写字段白名单——
@@ -142,6 +181,8 @@ type ChannelDef struct {
 	ContextPolicy string              `json:"context_policy,omitempty"`
 	// RecallPolicy 见 InjectOptions.RecallPolicy；空串等价 auto（保持既有行为）。
 	RecallPolicy string `json:"recall_policy,omitempty"`
+	// ScenePolicy 见 InjectOptions.ScenePolicy；空串等价 auto（保持既有行为）。
+	ScenePolicy string `json:"scene_policy,omitempty"`
 }
 
 // StageContext provides context for stage handlers.
@@ -199,6 +240,41 @@ type ToolResult struct {
 	Result  interface{} `json:"result"`
 }
 
+// ToolError 描述一次工具调用的失败原因。
+//
+// 存在的理由：失败若只表达为文本，模型无法定位到字段，只能原样重试
+// （实测 cmd_run 失败率 34%~48%，全部源于同一个成因：参数被截断或
+// JSON 写坏，工具却只回报 "command is required" 这类与真因无关的错）。
+//
+// ⚠️ 零值语义：插件**不必**改用本类型。内核的失败识别同时兼容既有三种约定
+// （{"error":…}、{"isError":true,…}、显式 error 返回），见 core.isToolError。
+// 本类型是给**新写**的工具用的可选项，不是迁移要求。
+type ToolError struct {
+	// Field 是出错的参数字段名（参数校验失败时填）。
+	Field string `json:"field,omitempty"`
+	// Reason 是机器可读的原因码：required / type / unauthorized / timeout / not_found。
+	Reason string `json:"reason"`
+	// Detail 是人类可读的补充说明。
+	Detail string `json:"detail,omitempty"`
+	// Hint 是给模型的可执行指引（该改什么、不要重试什么）。
+	Hint string `json:"hint,omitempty"`
+}
+
+// Error 实现 error，便于工具同时走 (ToolError, error) 通道。
+func (e *ToolError) Error() string {
+	if e == nil {
+		return ""
+	}
+	s := e.Reason
+	if e.Field != "" {
+		s = e.Field + ": " + s
+	}
+	if e.Detail != "" {
+		s += " (" + e.Detail + ")"
+	}
+	return s
+}
+
 // ToolDef describes a tool that the plugin exposes.
 type ToolDef struct {
 	Name          string                 `json:"name"`
@@ -212,6 +288,29 @@ type ToolDef struct {
 	// ""(默认 none) / RecallPolicyNone / RecallPolicyAuto。
 	// 默认 none：多数工具输出是噪声；需要「取回真实内容后据它召回」的工具（如 qq_get_message）应显式声明 auto。
 	RecallPolicy string `json:"recall_policy,omitempty"`
+	// ParallelSafe 声明此工具**可以被并发执行**（同一批多个 tool_call 同时跑）。
+	//
+	// ⚠️ 零值 false 是刻意的：存量插件不改一行就得到**保守**行为
+	//（整批串行），不会因升级被意外并发。声明它是**责任**而非特权。
+	//
+	// 判据（三者皆满足才可并发）：
+	//   · handler 自身线程安全（不持有跨调用的可变状态）
+	//   · 不与同批其它工具争抢同一资源（SQLite 写、设备、同一输出通道）
+	//   · 执行顺序无关（顺序敏感的工具应留 false，由内核保序）
+	ParallelSafe bool `json:"parallel_safe,omitempty"`
+	// Serial 声明本工具**必须**串行 —— ParallelSafe 的反向标记。
+	//
+	// 为什么需要它：ParallelSafe 的零值 false 已经表达"安全/串行"，
+	// 插件无法区分"我没想过"和"我确认过必须串行"。一旦工具作者需要
+	// 把"这里**故意**串行，是有原因的"写进代码（而不只是没填），
+	// 这个区分就是必需的 —— 否则只能靠命名约定传递意图。
+	//
+	// 适用场景：读操作但有隐含顺序约束（终端 read/resize 这类共享会话
+	// 状态）、或写操作虽已加锁但需要串行以获得可预测的交错顺序。
+	//
+	// 判据优先级：**Serial 胜出**。显式声明"必须串行"不允许被
+	// ParallelSafe 或任何默认值覆盖。
+	Serial bool `json:"serial,omitempty"`
 }
 
 // IOInjector provides methods for injecting input and interrupts into the agent pipeline.

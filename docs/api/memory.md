@@ -236,7 +236,7 @@ func (s *PluginSDK) DocMemory() DocMemoryAPI
 
 DocMemory returns the document memory API (may be nil if not available).
 
-<small>`plugin.go:423`</small>
+<small>`plugin.go:522`</small>
 
 ### `Entity`
 
@@ -251,7 +251,7 @@ Entity represents a named entity in the knowledge graph.
 ### `Knowledge`
 
 ```go
-type Knowledge struct { Name string `json:"name"` Content string `json:"content"` }
+type Knowledge struct { Name string `json:"name"` // Category 是该条目的父分类路径（如 "tech/go"），根下条目为空。 // // 为何加这个字段：对�� …
 ```
 
 Knowledge represents a knowledge entry.
@@ -278,7 +278,7 @@ Knowledge returns the knowledge store API (may be nil if not available).
 |---|---|---|
 | [`recoverydiag`](../examples/index.md#recoverydiag) | `example/recoverydiag/plugin.go:978` | `if p.sdk != nil && p.sdk.Knowledge() != nil {` |
 
-<small>`plugin.go:430`</small>
+<small>`plugin.go:529`</small>
 
 ### `MediaAttachment`
 
@@ -308,7 +308,7 @@ func (s *PluginSDK) Memory() MemoryAPI
 
 Memory returns the graph memory API (may be nil if not available).
 
-<small>`plugin.go:409`</small>
+<small>`plugin.go:508`</small>
 
 ### `PersonProfile`
 
@@ -338,7 +338,7 @@ func (s *PluginSDK) Social() SocialAPI
 
 Social returns the social graph API (may be nil if not available).
 
-<small>`plugin.go:444`</small>
+<small>`plugin.go:543`</small>
 
 ### `SocialRelation`
 
@@ -366,7 +366,7 @@ func (s *PluginSDK) TextMemory() TextMemoryAPI
 
 TextMemory returns the text memory API (may be nil if not available).
 
-<small>`plugin.go:416`</small>
+<small>`plugin.go:515`</small>
 
 ### `Triple`
 
