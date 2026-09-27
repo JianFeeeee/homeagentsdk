@@ -90,6 +90,15 @@ type ToolDef struct {
 	NoMemory      bool                   `json:"no_memory,omitempty"`
 	Cleaner       func(string) string    `json:"-"`
 	ContextPolicy string                 `json:"context_policy,omitempty"`
+	RecallPolicy  string                 `json:"recall_policy,omitempty"`
+	// ParallelSafe / Serial 与公共 SDK 的同名声明项**逐字对齐**。
+	//
+	// ⚠️ 不要只补主 SDK 就以为完事：mocksdk 是 yaegi 解释执行用的**替身**，
+	// 少一个字段，插件作者在本地调试时"写了声明却不报错"，编译安装后才发现
+	// 声明没生效 —— 这种不一致极难察觉（黑名单不会自动跟上新执行能力）。
+	// TestMockSDKToolDefMatchesSDK 钉住这一致。
+	ParallelSafe bool `json:"parallel_safe,omitempty"`
+	Serial       bool `json:"serial,omitempty"`
 }
 
 // 上下文策略取值，与公共 SDK 一致。
