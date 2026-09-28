@@ -25,6 +25,8 @@ func main() {
 		cmdDebug(os.Args[2:])
 	case "sdk":
 		cmdSDK(os.Args[2:])
+	case "skill":
+		cmdSkill(os.Args[2:])
 	case "version", "-v", "--version":
 		printVersion()
 	default:
@@ -69,6 +71,7 @@ Usage:
   hmapdev clean                   Clean build/dist artifacts
   hmapdev debug [dir]             Interpret and debug plugin source
   hmapdev sdk <command>           Manage SDK versions
+  hmapdev skill <command>          Install plugin-dev skills into agent skill dirs
 
 Flags:
   --outdir    Output directory (default: dist)
