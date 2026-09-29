@@ -249,7 +249,9 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p /tmp/back && cd /tmp/back
-          gh release download "$TAG"
+          # 同主仓：/tmp/back 不是 git 仓库，gh 无法从上下文推断仓库，
+          # 必须显式 --repo。
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY"
           for f in *; do
             printf "  %8.1fMB  %s\n" \
               "$(stat -c %s "$f" | awk '{print $1/1048576}')" "$f"
