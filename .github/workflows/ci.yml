@@ -1,0 +1,219 @@
+# HomeAgent SDK 仓 CI。
+#
+# 与 release.yml 分工：本文件管「推送到 main / PR 时的检查」，release.yml 管
+# 「release/** 推送时的发版」。此前本仓**只有** release.yml —— main 的推送与
+# PR 完全没有检查，而 SDK 是被外部插件开发者直接依赖的契约面（sdk/plugin.go
+# 的接口一旦破，所有外部插件编译失败），必须有门。
+#
+# 设计原则与主仓一致：**CI 里每条命令都是本地已实测通过的**。
+# 不写「应该有用来试试」的步骤 —— 未验证的 CI 步骤会把假红灯变成常态。
+#
+# 明确不进 CI 的：
+#   - `hmapdev skill install`（会写 ~/.claude、~/.codex 等**开发者本机目录**）
+#   - 需要内核仓在场的检查（本仓独立可测；sync-lua-sdk.sh 会在缺内核时
+#     明确 skip 而不是假装成功）
+#   - 任何网络/真机依赖
+name: CI
+
+on:
+  push:
+    branches: [main, 'release/**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # SDK 本身不需要 cgo（hmapdev 与 sdk 包都是纯 Go）—— 与主仓相反。
+  CGO_ENABLED: 0
+  GOFLAGS: -buildvcs=false
+
+jobs:
+  # ── 根模块：SDK 对外接口所在 ──
+  go:
+    name: Go build / vet / test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: go build ./...
+        run: go build ./...
+      - name: go vet ./...
+        run: go vet ./...
+      - name: go test ./...
+        run: go test ./... -count=1 -timeout 10m
+
+  # ── hmapdev 工具链（嵌套 module，根模块的 ./... 不会进入它）──
+  hmapdev:
+    name: hmapdev (${{ matrix.goos }}/${{ matrix.goarch }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+            ext: ''
+          - goos: linux
+            goarch: arm64
+            ext: ''
+          - goos: darwin
+            goarch: amd64
+            ext: ''
+          - goos: darwin
+            goarch: arm64
+            ext: ''
+          - goos: windows
+            goarch: amd64
+            ext: '.exe'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # tools/hmapdev 是**独立 module**（有自己的 go.mod）——
+      # 根模块的 `go test ./...` 不会进入它，必须单独跑，否则它的测试
+      # 永远不在 CI 里执行。这是 Go 的模块边界，不是配置问题。
+      - name: go test（嵌套 module）
+        working-directory: tools/hmapdev
+        run: go test ./... -count=1 -timeout 10m
+
+      - name: 交叉编译
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          set -euo pipefail
+          out="hmapdev_${{ matrix.goos }}_${{ matrix.goarch }}${{ matrix.ext }}"
+          go build -trimpath \
+            -ldflags "-X gitcode.com/JianFeeeee/homeagent-sdk/meta.Version=0.0.0-ci" \
+            -o "/tmp/$out" .
+          test -s "/tmp/$out" || { echo "ERROR: 未产出 $out"; exit 1; }
+          printf "  ✓ %-28s %s 字节\n" "$out" "$(stat -c %s "/tmp/$out")"
+          file "/tmp/$out"
+
+  # ── 示例插件：发版产物里最容易被使用者直接安装的东西 ──
+  #
+  # 为什么必须验：示例是使用者的模板（拷了就改），且**发版会连同 .hmap 一起发**
+  # —— 插件二进制与内核是协议绑定的（ProtocolVersion + 统一共享内存区魔数），
+  # 示例编不出来就意味着这次发版发不出配套产物。
+  #
+  # ★ 示例**不能**用 `go build` 验：它们是插件（只有 plugin.go、没有 func main），
+  #   必须由 hmapdev 注入 main 包装。直接 go build 会得到
+  #   "function main is undeclared in the main package" —— 那不是缺陷，
+  #   是构建方式不对（本地实测确认）。
+  examples:
+    name: Examples (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        # windows 不在列：build-examples.sh 会明确拒绝（协议 2 的统一共享
+        # 内存区未移植到 Windows），那是有意的设计而不是待修缺陷。
+        target: ['linux/amd64', 'darwin/arm64']
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: 构建 hmapdev（宿主）
+        run: |
+          set -euo pipefail
+          cd tools/hmapdev
+          go build -o "$GITHUB_WORKSPACE/build/hmapdev_host" .
+
+      # 用发版同一个脚本（package/build-examples.sh），避免 CI 与发版路径分叉。
+      - name: 构建全部示例
+        env:
+          HMAPDEV: ${{ github.workspace }}/build/hmapdev_host
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          bash package/build-examples.sh "$TARGET" /tmp/examples
+          echo
+          n=$(find /tmp/examples -name '*.hmap' | wc -l)
+          echo "  .hmap 产物数: $n"
+          # 示例目录数应与产物数一致（少一个都要红）
+          want=$(find example -mindepth 2 -maxdepth 2 -name plugin.go | wc -l)
+          echo "  示例源码数:   $want"
+          [ "$n" -ge "$want" ] || { echo "ERROR: 产物少于示例数"; exit 1; }
+          for f in /tmp/examples/*.hmap; do
+            printf "    %9.1fKB  %s\n" \
+              "$(stat -c %s "$f" | awk '{print $1/1024}')" "$(basename "$f")"
+          done
+
+  # ── 一致性与文档 ──
+  consistency:
+    name: Consistency & docs
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      # sdk.lua 有**四份**副本（本仓三份 + 内核仓一份），历史上漂移过，
+      # 出现「mock 有、内核没有」的静默失配。此处钉住本仓内的三份。
+      - name: Lua SDK 副本一致性
+        run: |
+          set -euo pipefail
+          canon=sdk/lua/sdk.lua
+          [ -f "$canon" ] || { echo "ERROR: 缺 $canon"; exit 1; }
+          want=$(sha256sum "$canon" | cut -d' ' -f1)
+          fail=0
+          for f in tools/hmapdev/assets/sdk.lua example/luademo/sdk.lua; do
+            have=$(sha256sum "$f" | cut -d' ' -f1)
+            if [ "$have" = "$want" ]; then
+              echo "  ✓ $f"
+            else
+              echo "  ✗ $f 与 $canon 不一致" >&2
+              echo "      canon=$want" >&2
+              echo "      this =$have" >&2
+              echo "      解法：bash scripts/sync-lua-sdk.sh" >&2
+              fail=1
+            fi
+          done
+          [ "$fail" = "0" ] || exit 1
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # skills/ 会随 SDK store 分发给所有 agent（hmapdev skill install）。
+      # skill list 会读 skills/ 目录并报告可用项 —— 目录结构坏掉会在这里红。
+      - name: 技能目录可被 hmapdev 识别
+        run: |
+          set -euo pipefail
+          cd tools/hmapdev && go build -o /tmp/hmapdev . && cd "$GITHUB_WORKSPACE"
+          /tmp/hmapdev skill list
+          /tmp/hmapdev skill path
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      # 文档站会被部署（deploy-sdk-site.sh）——站点构建坏了此前无从发现。
+      # --strict 把 warning 升级为 error：断链、缺失引用都会红。
+      #
+      # ★ 不能用 yaml.safe_load 校验 mkdocs.yml：它含 mkdocs-material 的
+      #   `!!python/name:` 标签（配置 emoji 的官方写法），safe_load 处理不了，
+      #   会报 ConstructorError —— 那是校验方式不对，不是配置有问题。
+      - name: 文档站构建（mkdocs --strict）
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet mkdocs-material
+          mkdocs build --strict --site-dir /tmp/site
