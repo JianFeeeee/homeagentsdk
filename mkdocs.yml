@@ -92,9 +92,17 @@ markdown_extensions:
 extra:
   generator: false
   social:
+    # 主仓已迁到 GitHub；gitcode 保留为国内镜像（源码同步）。
+    # 两个链接都放，是因为国内直连 gitcode 更快，而海外/权威源看 GitHub。
     - icon: fontawesome/solid/code
+      link: https://github.com/JianFeeeee/homeagentsdk
+      name: SDK 源码（GitHub）
+    - icon: fontawesome/solid/code-branch
       link: https://gitcode.com/JianFeeeee/homeagent-sdk
-      name: SDK 源码
+      name: gitcode 镜像（国内）
+    - icon: fontawesome/solid/house
+      link: https://introduce.homeagent.jianfgit.xyz/
+      name: HomeAgent 介绍站
   # 自定义检索端点在 docs/javascripts/api-search.js 里注册，
   # 索引文件由 gensite 产出：docs/assets/api-index.json
 

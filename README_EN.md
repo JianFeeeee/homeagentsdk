@@ -2,6 +2,16 @@
 
 Plugin development SDK for building intelligent plugins that interact with the HomeAgent platform.
 
+> 📖 **Full documentation**: <https://sdk.homeagent.jianfgit.xyz/>
+>
+> Quick start / API reference / guides / example plugins all live there. **This README is a
+> summary only** — the docs site is authoritative for interface details.
+> Jump to: [Getting started](https://sdk.homeagent.jianfgit.xyz/guide/getting-started/)
+> · [API reference](https://sdk.homeagent.jianfgit.xyz/api/) · [Capability boundary](https://sdk.homeagent.jianfgit.xyz/guide/capability-boundary/)
+>
+> Agent-friendly plain-text entry points: [`llms.txt`](https://sdk.homeagent.jianfgit.xyz/llms.txt)
+> and [`llms-full.txt`](https://sdk.homeagent.jianfgit.xyz/llms-full.txt) (the whole docs in one file).
+
 ## Version and Compatibility
 
 Current: **SDK 1.3.0** (requires kernel **1.3.0+**).

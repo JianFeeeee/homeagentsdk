@@ -13,13 +13,19 @@
 从源码构建：
 
 ```bash
-git clone https://gitcode.com/JianFeeeee/homeagent-sdk
-cd homeagent-sdk/tools/hmapdev
+git clone https://github.com/JianFeeeee/homeagentsdk
+cd homeagentsdk/tools/hmapdev
 go build -o hmapdev
 # 把 hmapdev 放进 PATH，或直接用 ./hmapdev
 ```
 
-也可以从 SDK 的 release 附件下载预编译二进制（`hmapdev_linux_amd64` 等）。
+也可以从 SDK 的 release 附件下载预编译二进制（`hmapdev_linux_amd64` 等，
+共 5 个平台：linux/darwin/windows × amd64/arm64）。
+
+> 仓已迁到 GitHub；gitcode 仅作国内镜像（源码同步，**release 附件暂时仍在那里**）：
+> `https://gitcode.com/JianFeeeee/homeagent-sdk/releases`。
+> Go 模块路径仍是 `gitcode.com/JianFeeeee/homeagent-sdk` —— 这是有意保留的，
+> 改模块路径会让现有插件的 `go.mod` 全面失效。
 
 ## SDK 版本管理
 

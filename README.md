@@ -2,6 +2,15 @@
 
 HomeAgent 插件开发 SDK，用于构建与 HomeAgent 平台交互的智能插件。
 
+> 📖 **完整文档**：<https://sdk.homeagent.jianfgit.xyz/>
+>
+> 快速开始 / API 参考 / 指南 / 示例插件都在那里，**本 README 只是速览**，
+> 接口细节以文档站为准。直接进入：[快速开始](https://sdk.homeagent.jianfgit.xyz/guide/getting-started/)
+> · [API 参考](https://sdk.homeagent.jianfgit.xyz/api/) · [能力边界](https://sdk.homeagent.jianfgit.xyz/guide/capability-boundary/)
+>
+> 面向 agent 的纯文本入口：[`llms.txt`](https://sdk.homeagent.jianfgit.xyz/llms.txt)
+> （含全部 API 的 [`llms-full.txt`](https://sdk.homeagent.jianfgit.xyz/llms-full.txt)）。
+
 ## 版本与兼容性
 
 当前：**SDK 1.3.0**（需内核 **1.3.0+**）。
@@ -337,15 +346,23 @@ func New(name string, sett SettingsAPI, regTool ToolRegistrar, regStage StageReg
 ## hmapdev 工具链
 
 `hmapdev` 提供插件开发全流程支持，最终产出 `.hmap` 插件包（工具名即来自该包格式）。
-预编译二进制作为 **release 附件**分发（linux/darwin/windows × amd64/arm64），从
-[Releases](https://gitcode.com/JianFeeeee/homeagent-sdk/releases) 下载后加入 PATH 即可：
+预编译二进制作为 **release 附件**分发（linux/darwin/windows × amd64/arm64），
+下载后加入 PATH 即可：
+
+> ⚠️ **二进制的实际分发地址目前是 gitcode**（两个仓的 release 附件不同步）：
+> `hmapdev_linux_amd64` 等 5 个平台二进制 + `SHA256SUMS` 在
+> <https://gitcode.com/JianFeeeee/homeagent-sdk/releases>。
+> GitHub 侧（<https://github.com/JianFeeeee/homeagentsdk/releases>）从
+> 下一个 SDK 版本（v1.4.0）起才会同步发布 —— 因为 SDK 仓**移仓后还没发过版**。
+> 源码与文档一律以 GitHub 为准，**只有二进制暂时还得到 gitcode 取**。
 
 > 改名说明：工具链原名 `plugindev`，自 1.2.0 起更名 `hmapdev`。
 > SDK 存储目录同时由 `~/.homeagent/plugindev/sdk` 迁到 `~/.homeagent/hmapdev/sdk`
 > （旧目录会被自动沿用，不会丢已装版本）。
 
 ```bash
-# 从 release 附件下载（以最新 SDK 发布 / linux amd64 为例）
+# 从 release 附件下载（以 linux amd64 为例，<版本> 如 v1.3.0）
+# 当前实际分发地址是 gitcode（见下方说明）：
 curl -Lo hmapdev https://gitcode.com/JianFeeeee/homeagent-sdk/releases/download/<版本>/hmapdev_linux_amd64
 chmod +x hmapdev
 
@@ -955,6 +972,19 @@ curl -X POST http://127.0.0.1:9876/plugins \
 ```
 
 或通过 WebUI 插件管理页面上传，也可手动将 `.hmap` 放入插件目录后重启平台。
+
+## 文档
+
+- 文档站：**<https://sdk.homeagent.jianfgit.xyz/>**
+- 快速开始：[环境与工具链](https://sdk.homeagent.jianfgit.xyz/guide/getting-started/) · [第一个 Go 插件](https://sdk.homeagent.jianfgit.xyz/guide/first-plugin/) · [第一个 Lua 插件](https://sdk.homeagent.jianfgit.xyz/guide/first-lua-plugin/)
+- API 参考：[总览](https://sdk.homeagent.jianfgit.xyz/api/) · [工具](https://sdk.homeagent.jianfgit.xyz/api/tools/) · [阶段钩子](https://sdk.homeagent.jianfgit.xyz/api/stages/) · [记忆](https://sdk.homeagent.jianfgit.xyz/api/memory/) · [输入/输出通道](https://sdk.homeagent.jianfgit.xyz/api/channels/)
+- 指南：[能力边界（哪些 API 外部可用）](https://sdk.homeagent.jianfgit.xyz/guide/capability-boundary/) · [工具并发声明](https://sdk.homeagent.jianfgit.xyz/guide/parallel-tool-declaration/) · [流式多 tool_call](https://sdk.homeagent.jianfgit.xyz/guide/stream-tool-call-index/) · [场景记忆](https://sdk.homeagent.jianfgit.xyz/guide/scene-memory/) · [打包与发布](https://sdk.homeagent.jianfgit.xyz/guide/packaging/)
+- 版本与兼容：<https://sdk.homeagent.jianfgit.xyz/versions/>
+- 核心仓（内核 / 记忆 / 调度）：<https://github.com/JianFeeeee/HomeAgent>
+- 介绍站：<https://introduce.homeagent.jianfgit.xyz/>
+
+> 文档站为自托管（国内直连，不必挂代理）。构建与部署见核心仓的
+> `deploy-sdk-site.sh`（`--check` 只比对、`--rollback` 回滚）。
 
 ## 许可
 
