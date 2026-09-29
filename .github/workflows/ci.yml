@@ -41,9 +41,15 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
+      # ★ 钉 1.25 而不是 go-version-file: go.mod —— 根 go.mod 写的是
+      #   go 1.21.0，但 20 个 example/*/go.mod 都要求 go 1.25.0。
+      #   读根 go.mod 会装 1.21，examples 构建必然失败
+      #   （"go.mod requires go >= 1.25.0 (running go 1.21.0; GOTOOLCHAIN=local)"）。
+      #   GitHub runner 上 GOTOOLCHAIN=local，Go 不会自动下载更高工具链，
+      #   所以本地「能过」不代表 CI 能过。
       - uses: actions/setup-go@v7
         with:
-          go-version-file: go.mod
+          go-version: '1.25'
           cache: true
       - name: go build ./...
         run: go build ./...
@@ -78,9 +84,15 @@ jobs:
             ext: '.exe'
     steps:
       - uses: actions/checkout@v7
+      # ★ 钉 1.25 而不是 go-version-file: go.mod —— 根 go.mod 写的是
+      #   go 1.21.0，但 20 个 example/*/go.mod 都要求 go 1.25.0。
+      #   读根 go.mod 会装 1.21，examples 构建必然失败
+      #   （"go.mod requires go >= 1.25.0 (running go 1.21.0; GOTOOLCHAIN=local)"）。
+      #   GitHub runner 上 GOTOOLCHAIN=local，Go 不会自动下载更高工具链，
+      #   所以本地「能过」不代表 CI 能过。
       - uses: actions/setup-go@v7
         with:
-          go-version-file: go.mod
+          go-version: '1.25'
           cache: true
 
       # tools/hmapdev 是**独立 module**（有自己的 go.mod）——
@@ -90,7 +102,10 @@ jobs:
         working-directory: tools/hmapdev
         run: go test ./... -count=1 -timeout 10m
 
+      # main 包在 tools/hmapdev —— 不指定工作目录会在仓库根跑 `go build .`，
+      # 而根目录没有 Go 文件（包在 sdk/ 子目录），报 "no Go files in ..."。
       - name: 交叉编译
+        working-directory: tools/hmapdev
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
@@ -126,9 +141,15 @@ jobs:
         target: ['linux/amd64', 'darwin/arm64']
     steps:
       - uses: actions/checkout@v7
+      # ★ 钉 1.25 而不是 go-version-file: go.mod —— 根 go.mod 写的是
+      #   go 1.21.0，但 20 个 example/*/go.mod 都要求 go 1.25.0。
+      #   读根 go.mod 会装 1.21，examples 构建必然失败
+      #   （"go.mod requires go >= 1.25.0 (running go 1.21.0; GOTOOLCHAIN=local)"）。
+      #   GitHub runner 上 GOTOOLCHAIN=local，Go 不会自动下载更高工具链，
+      #   所以本地「能过」不代表 CI 能过。
       - uses: actions/setup-go@v7
         with:
-          go-version-file: go.mod
+          go-version: '1.25'
           cache: true
 
       - name: 构建 hmapdev（宿主）
@@ -188,9 +209,15 @@ jobs:
           done
           [ "$fail" = "0" ] || exit 1
 
+      # ★ 钉 1.25 而不是 go-version-file: go.mod —— 根 go.mod 写的是
+      #   go 1.21.0，但 20 个 example/*/go.mod 都要求 go 1.25.0。
+      #   读根 go.mod 会装 1.21，examples 构建必然失败
+      #   （"go.mod requires go >= 1.25.0 (running go 1.21.0; GOTOOLCHAIN=local)"）。
+      #   GitHub runner 上 GOTOOLCHAIN=local，Go 不会自动下载更高工具链，
+      #   所以本地「能过」不代表 CI 能过。
       - uses: actions/setup-go@v7
         with:
-          go-version-file: go.mod
+          go-version: '1.25'
           cache: true
 
       # skills/ 会随 SDK store 分发给所有 agent（hmapdev skill install）。
@@ -198,9 +225,14 @@ jobs:
       - name: 技能目录可被 hmapdev 识别
         run: |
           set -euo pipefail
-          cd tools/hmapdev && go build -o /tmp/hmapdev . && cd "$GITHUB_WORKSPACE"
-          /tmp/hmapdev skill list
-          /tmp/hmapdev skill path
+          # ★ 必须把 hmapdev 建在**仓库内**：resolveSkillsSource() 先从
+          #   可执行文件位置向上找仓库（tools/hmapdev → ../../skills），
+          #   落空才回退到 SDK store 的活跃版本 —— 而 CI 里没有 store，
+          #   于是报 "no active SDK version set"。建到 /tmp 就会落空。
+          mkdir -p build
+          ( cd tools/hmapdev && go build -o "$GITHUB_WORKSPACE/build/hmapdev_ci" . )
+          ./build/hmapdev_ci skill list
+          ./build/hmapdev_ci skill path
 
       - uses: actions/setup-python@v7
         with:
