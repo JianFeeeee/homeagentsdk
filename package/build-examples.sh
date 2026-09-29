@@ -68,13 +68,21 @@ fi
 # 1) 先保证工具链可用：示例必须用**本仓当前源码**构建，否则产物协议与这一版 SDK 不符。
 #    允许外部指定（发版脚本会在跨平台构建后把刚产出的工具链路径传进来）。
 # 工具链二进制名由 plugindev 改为 hmapdev；旧变量名 PLUGINDEV 仍兼容。
+#
+# ★ 下面三处必须读 **HMAPDEV**（上一行刚解析出的规范名）。
+#   曾经读的是 PLUGINDEV：那样只有调用方恰好传旧名时才工作，
+#   而新名 HMAPDEV 只被赋给 HMAPDEV 本身、PLUGINDEV 仍是未定义，
+#   在 `set -u` 下第一处判断就 "PLUGINDEV: unbound variable" 直接退出。
+#   实测（2026-09-29）：HMAPDEV=... → exit 1；PLUGINDEV=... → 20/20 成功。
+#   发版路径传的是旧名（build.sh:92）故一直没暴露——正是「兼容」二字
+#   写在注释里、却没在代码里做到的那种缺陷。
 HMAPDEV="${HMAPDEV:-${PLUGINDEV:-$SDK_ROOT/build/hmapdev}}"
-if [ ! -x "$PLUGINDEV" ]; then
+if [ ! -x "$HMAPDEV" ]; then
   echo "[examples] 先构建 hmapdev ..."
   ( cd "$SDK_ROOT/tools/hmapdev" && "$GO" build -o "$HMAPDEV" . ) || {
     echo "[examples] hmapdev 构建失败，无法继续" >&2; exit 1; }
 fi
-if [ ! -x "$PLUGINDEV" ]; then
+if [ ! -x "$HMAPDEV" ]; then
   echo "[examples] hmapdev 不存在或不可执行：$HMAPDEV" >&2
   exit 1
 fi
@@ -97,7 +105,7 @@ for dir in "$SDK_ROOT"/example/*/; do
   # 清掉旧产物：残留会让人（和本脚本）误判成功。
   rm -rf "$dir/build" "$dir/dist"
 
-  out=$( cd "$dir" && "$PLUGINDEV" build --no-bundle --target "$GOOS/$GOARCH" 2>&1 )
+  out=$( cd "$dir" && "$HMAPDEV" build --no-bundle --target "$GOOS/$GOARCH" 2>&1 )
   rc=$?
 
   # 判据是**退出码 + 产物存在**，两者都要。
