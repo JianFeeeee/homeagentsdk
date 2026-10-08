@@ -34,7 +34,8 @@ func TestPrintVersionReportsInjectedVersion(t *testing.T) {
 	if !strings.Contains(out, "deadbee") {
 		t.Fatalf("提交号未出现在输出里:\n%s", out)
 	}
-	if !strings.Contains(out, "HomeAgent") && !strings.Contains(out, "homeagent-sdk") {
+	if !strings.Contains(out, "HomeAgent") && !strings.Contains(out, "homeagent-sdk") &&
+		!strings.Contains(out, "homeagentsdk") {
 		t.Fatalf("输出里没有 SDK 模块标识:\n%s", out)
 	}
 }

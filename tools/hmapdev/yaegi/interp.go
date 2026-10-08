@@ -28,10 +28,10 @@ func findSDKGoPath(pluginDir string) string {
 	if data, err := os.ReadFile(gm); err == nil {
 		for _, line := range strings.Split(string(data), "\n") {
 			line = strings.TrimSpace(line)
-			if strings.HasPrefix(line, "replace ") && strings.Contains(line, "homeagent-sdk") {
+			if strings.HasPrefix(line, "replace ") && isSDKModule(line) {
 				parts := strings.Fields(line)
 				for _, p := range parts {
-					if strings.Contains(p, "homeagent-sdk") && strings.Contains(p, string(filepath.Separator)) {
+					if isSDKModule(p) && strings.Contains(p, string(filepath.Separator)) {
 						return filepath.Dir(filepath.Dir(p))
 					}
 				}

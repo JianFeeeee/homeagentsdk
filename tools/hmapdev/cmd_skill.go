@@ -130,7 +130,7 @@ func repoSkillsFromExe(exe string) string {
 		if st, err := os.Stat(cand); err == nil && st.IsDir() {
 			// 确认这确实像 SDK 仓（有 go.mod 且 module 是 homeagent-sdk）
 			if gm, err := os.ReadFile(filepath.Join(dir, "go.mod")); err == nil &&
-				strings.Contains(string(gm), "homeagent-sdk") {
+				containsSDKModule(string(gm)) {
 				return cand
 			}
 		}

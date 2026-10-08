@@ -411,7 +411,7 @@ func ensureGoMod(plg *PlgConfig, sdkPath string) string {
 				mod = parts[0]
 			}
 		}
-		if mod != "" && strings.Contains(mod, "homeagent-sdk") {
+		if mod != "" && isSDKModule(mod) {
 			sdkModule = mod
 			break
 		}
