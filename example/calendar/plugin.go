@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	sdk "gitcode.com/JianFeeeee/homeagent-sdk/sdk"
+	sdk "github.com/JianFeeeee/homeagentsdk/sdk"
 )
 
 const (

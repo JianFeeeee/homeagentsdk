@@ -4,10 +4,11 @@ import (
 	"encoding/json"
 	"testing"
 
-	sdk "gitcode.com/JianFeeeee/homeagent-sdk/sdk"
+	sdk "github.com/JianFeeeee/homeagentsdk/sdk"
 )
 
-// 本测试验证 tmplLinuxBridge 中 snapshotWritable + changedFieldsOnly 的语义（plan.md 11.3）。
+// 本测试验证 tmplLinuxBridge 中 snapshotWritable + changedFieldsOnly 的语义。
+// 该语义于 2026-09 落地并经本测试锁定（历史依据见 git log --grep=hmapdev）。
 // 模板字符串本身无法直接单测，这里以同一份逻辑复刻，防止回归。
 // ❗ 模板与本文件须同步修改。
 //

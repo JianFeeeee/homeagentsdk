@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	"gitcode.com/JianFeeeee/homeagent-sdk/sdk"
+	"github.com/JianFeeeee/homeagentsdk/sdk"
 )
 
 // acpPlugin 实现 Agent Client Protocol (ACP) 0.0.x 子集：

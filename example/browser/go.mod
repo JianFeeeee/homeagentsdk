@@ -3,7 +3,7 @@ module browser
 go 1.25.0
 
 require (
-	gitcode.com/JianFeeeee/homeagent-sdk v0.0.0
+	github.com/JianFeeeee/homeagentsdk v0.0.0
 	github.com/chromedp/chromedp v0.9.5
 	github.com/chromedp/cdproto v0.0.0-20240202021202-6d0b6a386732
 	github.com/chromedp/sysutil v1.0.0
@@ -17,10 +17,10 @@ require (
 	golang.org/x/sys v0.16.0
 )
 
-replace gitcode.com/JianFeeeee/homeagent-sdk => ../../
+replace github.com/JianFeeeee/homeagentsdk => ../../
 
-replace gitcode.com/JianFeeeee/homeagent-sdk => ../../
+replace github.com/JianFeeeee/homeagentsdk => ../../
 
-replace gitcode.com/JianFeeeee/homeagent-sdk => ../../
+replace github.com/JianFeeeee/homeagentsdk => ../../
 
-replace gitcode.com/JianFeeeee/homeagent-sdk => ../../
+replace github.com/JianFeeeee/homeagentsdk => ../../

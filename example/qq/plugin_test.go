@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"gitcode.com/JianFeeeee/homeagent-sdk/sdk"
+	"github.com/JianFeeeee/homeagentsdk/sdk"
 )
 
 func newPermissionTestPlugin(t *testing.T) *Plugin {

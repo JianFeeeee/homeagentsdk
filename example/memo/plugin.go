@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"gitcode.com/JianFeeeee/homeagent-sdk/sdk"
+	"github.com/JianFeeeee/homeagentsdk/sdk"
 )
 
 // Todo 待办条目：会被主动提醒

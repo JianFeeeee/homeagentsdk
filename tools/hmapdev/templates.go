@@ -23,9 +23,15 @@ go {{.GoVersion}}
 
 require {{.SDKModule}} {{.SDKVersion}}
 {{if .SDKLocalPath}}
-// SDK 指向本机源码。gitcode 的模块不在 proxy.golang.org 上，
-// 没有这条 replace 就需要 go.sum 条目，而那个条目无处可拉。
-// 若你已有可访问的私有 proxy，可删掉本行。
+// SDK 指向本机源码。
+//
+// ★ 为何默认走 replace 而不是直接拉模块（2026-10-08 更新）：
+//   SDK 已从 gitcode 迁到 GitHub（module 路径 github.com/JianFeeeee/homeagentsdk）。
+//   仓库虽在 GitHub，但本工程模板仍默认指向**本机源码**，原因与托管地无关：
+//   （1）hmapdev 装的是本机 SDK（~/.homeagent/hmapdev/sdk），离线也能构建；
+//   （2）插件必须与内核的 SDK 版本严格一致，走网络拉会引入版本漂移；
+//   （3）内网/受限出口环境拉不到公共 proxy。
+//   若你已有可访问的私有 proxy 或愿意走公网，可删掉本行。
 replace {{.SDKModule}} => {{.SDKLocalPath}}
 {{end}}`
 
@@ -33,7 +39,7 @@ const tmplPluginGo = `package main
 
 import (
 	"fmt"
-	"gitcode.com/JianFeeeee/homeagent-sdk/sdk"
+	"github.com/JianFeeeee/homeagentsdk/sdk"
 )
 
 type Plugin struct {

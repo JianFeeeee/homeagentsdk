@@ -26,7 +26,7 @@ import (
 	"strings"
 	"time"
 
-	"gitcode.com/JianFeeeee/homeagent-sdk/sdk"
+	"github.com/JianFeeeee/homeagentsdk/sdk"
 )
 
 const (

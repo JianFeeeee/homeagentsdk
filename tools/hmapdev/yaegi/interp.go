@@ -13,7 +13,7 @@ import (
 
 	"github.com/traefik/yaegi/interp"
 	"github.com/traefik/yaegi/stdlib"
-	"gitcode.com/JianFeeeee/homeagent-sdk/tools/hmapdev/yaegi/mocksdk"
+	"github.com/JianFeeeee/homeagentsdk/tools/hmapdev/yaegi/mocksdk"
 )
 
 type YaegiDebugger struct {
@@ -155,7 +155,7 @@ func NewYaegiDebugger(dir string, replaces []string) (*YaegiDebugger, error) {
 		pkg[name] = reflect.ValueOf(t)
 	}
 
-	sdkExports["gitcode.com/JianFeeeee/homeagent-sdk/sdk"] = pkg
+	sdkExports["github.com/JianFeeeee/homeagentsdk/sdk"] = pkg
 	i.Use(sdkExports)
 
 	return &YaegiDebugger{

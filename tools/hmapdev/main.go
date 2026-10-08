@@ -6,7 +6,7 @@ import (
 	"os"
 	"runtime"
 
-	"gitcode.com/JianFeeeee/homeagent-sdk/meta"
+	"github.com/JianFeeeee/homeagentsdk/meta"
 )
 
 func main() {
@@ -47,7 +47,7 @@ func printVersion() {
 // printVersionTo 把版本身份写到 w（抽出来是为了能被测试钉住）。
 func printVersionTo(w io.Writer) {
 	fmt.Fprintf(w, "hmapdev %s\n", meta.Version)
-	fmt.Fprintf(w, "  SDK 模块: %s\n", "gitcode.com/JianFeeeee/homeagent-sdk")
+	fmt.Fprintf(w, "  SDK 模块: %s\n", "github.com/JianFeeeee/homeagentsdk")
 	if meta.Commit != "" && meta.Commit != "unknown" {
 		fmt.Fprintf(w, "  构建提交: %s\n", meta.Commit)
 	}

@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	sdk "gitcode.com/JianFeeeee/homeagent-sdk/sdk"
+	sdk "github.com/JianFeeeee/homeagentsdk/sdk"
 )
 
 // structFields 解析 file 中的指定 struct，返回其字段名集合。

@@ -113,7 +113,7 @@ jobs:
           set -euo pipefail
           out="hmapdev_${{ matrix.goos }}_${{ matrix.goarch }}${{ matrix.ext }}"
           go build -trimpath \
-            -ldflags "-X gitcode.com/JianFeeeee/homeagent-sdk/meta.Version=0.0.0-ci" \
+            -ldflags "-X github.com/JianFeeeee/homeagentsdk/meta.Version=0.0.0-ci" \
             -o "/tmp/$out" .
           test -s "/tmp/$out" || { echo "ERROR: 未产出 $out"; exit 1; }
           printf "  ✓ %-28s %s 字节\n" "$out" "$(stat -c %s "/tmp/$out")"

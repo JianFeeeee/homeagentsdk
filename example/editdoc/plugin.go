@@ -9,7 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 
-	"gitcode.com/JianFeeeee/homeagent-sdk/sdk"
+	"github.com/JianFeeeee/homeagentsdk/sdk"
 )
 
 type Plugin struct {

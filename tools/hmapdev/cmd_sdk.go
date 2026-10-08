@@ -50,8 +50,8 @@ func sdkVersionDir(version string) string {
 	return filepath.Join(sdkStore(), version)
 }
 
-const sdkRepoURL = "https://gitcode.com/JianFeeeee/homeagent-sdk.git"
-const sdkDownloadURL = "https://gitcode.com/JianFeeeee/homeagent-sdk/-/archive/%s/homeagent-sdk-%s.tar.gz"
+const sdkRepoURL = "https://github.com/JianFeeeee/homeagentsdk.git"
+const sdkDownloadURL = "https://github.com/JianFeeeee/homeagentsdk/-/archive/%s/homeagent-sdk-%s.tar.gz"
 
 func cmdSDK(args []string) {
 	if len(args) < 1 {

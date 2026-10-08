@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"gitcode.com/JianFeeeee/homeagent-sdk/tools/hmapdev/yaegi"
+	"github.com/JianFeeeee/homeagentsdk/tools/hmapdev/yaegi"
 )
 
 // tmplLuaDebug is the temporary Lua debug script template

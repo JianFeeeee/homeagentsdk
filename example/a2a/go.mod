@@ -2,6 +2,6 @@ module a2a
 
 go 1.25.0
 
-require gitcode.com/JianFeeeee/homeagent-sdk v0.0.0
+require github.com/JianFeeeee/homeagentsdk v0.0.0
 
-replace gitcode.com/JianFeeeee/homeagent-sdk => ../../
+replace github.com/JianFeeeee/homeagentsdk => ../../

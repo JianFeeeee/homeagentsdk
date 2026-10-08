@@ -23,7 +23,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"gitcode.com/JianFeeeee/homeagent-sdk/sdk"
+	"github.com/JianFeeeee/homeagentsdk/sdk"
 )
 
 var (

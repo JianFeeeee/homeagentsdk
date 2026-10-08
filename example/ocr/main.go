@@ -3,7 +3,7 @@
 package main
 
 import (
-	sdk "gitcode.com/JianFeeeee/homeagent-sdk/sdk"
+	sdk "github.com/JianFeeeee/homeagentsdk/sdk"
 )
 
 func NewPlugin(name string, config map[string]interface{}) (sdk.Plugin, error) {

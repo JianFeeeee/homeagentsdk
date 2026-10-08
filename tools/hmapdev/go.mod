@@ -1,9 +1,9 @@
-module gitcode.com/JianFeeeee/homeagent-sdk/tools/hmapdev
+module github.com/JianFeeeee/homeagentsdk/tools/hmapdev
 
 go 1.21.0
 
-require gitcode.com/JianFeeeee/homeagent-sdk v0.0.0
+require github.com/JianFeeeee/homeagentsdk v0.0.0
 
 require github.com/traefik/yaegi v0.16.1
 
-replace gitcode.com/JianFeeeee/homeagent-sdk => ../../
+replace github.com/JianFeeeee/homeagentsdk => ../../
