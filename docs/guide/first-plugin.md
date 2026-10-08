@@ -56,7 +56,7 @@ package main
 import (
 	"fmt"
 
-	"gitcode.com/JianFeeeee/homeagent-sdk/sdk"
+	"github.com/JianFeeeee/homeagentsdk/sdk"
 )
 
 type Plugin struct {

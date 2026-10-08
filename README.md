@@ -351,7 +351,7 @@ func New(name string, sett SettingsAPI, regTool ToolRegistrar, regStage StageReg
 
 > ⚠️ **二进制的实际分发地址目前是 gitcode**（两个仓的 release 附件不同步）：
 > `hmapdev_linux_amd64` 等 5 个平台二进制 + `SHA256SUMS` 在
-> <https://gitcode.com/JianFeeeee/homeagent-sdk/releases>。
+> <https://github.com/JianFeeeee/homeagentsdk/releases>。
 > GitHub 侧（<https://github.com/JianFeeeee/homeagentsdk/releases>）从
 > 下一个 SDK 版本（v1.4.0）起才会同步发布 —— 因为 SDK 仓**移仓后还没发过版**。
 > 源码与文档一律以 GitHub 为准，**只有二进制暂时还得到 gitcode 取**。
@@ -363,7 +363,7 @@ func New(name string, sett SettingsAPI, regTool ToolRegistrar, regStage StageReg
 ```bash
 # 从 release 附件下载（以 linux amd64 为例，<版本> 如 v1.3.0）
 # 当前实际分发地址是 gitcode（见下方说明）：
-curl -Lo hmapdev https://gitcode.com/JianFeeeee/homeagent-sdk/releases/download/<版本>/hmapdev_linux_amd64
+curl -Lo hmapdev https://github.com/JianFeeeee/homeagentsdk/releases/download/<版本>/hmapdev_linux_amd64
 chmod +x hmapdev
 
 # 或从源码自己编

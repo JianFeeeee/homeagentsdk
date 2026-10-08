@@ -23,8 +23,8 @@ go build -o hmapdev
 共 5 个平台：linux/darwin/windows × amd64/arm64）。
 
 > 仓已迁到 GitHub；gitcode 仅作国内镜像（源码同步，**release 附件暂时仍在那里**）：
-> `https://gitcode.com/JianFeeeee/homeagent-sdk/releases`。
-> Go 模块路径仍是 `gitcode.com/JianFeeeee/homeagent-sdk` —— 这是有意保留的，
+> `https://github.com/JianFeeeee/homeagentsdk/releases`。
+> Go 模块路径仍是 `github.com/JianFeeeee/homeagentsdk` —— 这是有意保留的，
 > 改模块路径会让现有插件的 `go.mod` 全面失效。
 
 ## SDK 版本管理

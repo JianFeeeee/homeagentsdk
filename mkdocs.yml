@@ -98,7 +98,7 @@ extra:
       link: https://github.com/JianFeeeee/homeagentsdk
       name: SDK 源码（GitHub）
     - icon: fontawesome/solid/code-branch
-      link: https://gitcode.com/JianFeeeee/homeagent-sdk
+      link: https://github.com/JianFeeeee/homeagentsdk
       name: gitcode 镜像（国内）
     - icon: fontawesome/solid/house
       link: https://introduce.homeagent.jianfgit.xyz/

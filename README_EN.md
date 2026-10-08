@@ -338,7 +338,7 @@ Plugin developers only need to implement the `Plugin` interface and export a `Ne
 `hmapdev` provides full development workflow support and produces `.hmap` plugin bundles (the tool is
 named after that package format). Prebuilt binaries ship as **release assets**
 (linux/darwin/windows × amd64/arm64); download from
-[Releases](https://gitcode.com/JianFeeeee/homeagent-sdk/releases) and put it on your PATH:
+[Releases](https://github.com/JianFeeeee/homeagentsdk/releases) and put it on your PATH:
 
 > Rename note: the toolchain was called `plugindev` and is `hmapdev` since 1.2.0.
 > The SDK store moved from `~/.homeagent/plugindev/sdk` to `~/.homeagent/hmapdev/sdk`
@@ -346,7 +346,7 @@ named after that package format). Prebuilt binaries ship as **release assets**
 
 ```bash
 # From release assets (latest SDK release / linux amd64 shown)
-curl -Lo hmapdev https://gitcode.com/JianFeeeee/homeagent-sdk/releases/download/<version>/hmapdev_linux_amd64
+curl -Lo hmapdev https://github.com/JianFeeeee/homeagentsdk/releases/download/<version>/hmapdev_linux_amd64
 chmod +x hmapdev
 
 # Or build from source
