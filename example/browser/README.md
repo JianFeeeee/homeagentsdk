@@ -31,7 +31,7 @@
 | `browser_type` | 输入文本 |
 | `browser_scroll` | 滚动页面 |
 | `browser_html` | 取当前页 HTML |
-| `browser_screenshot` | 截图 |
+| `browser_screenshot` | 截图，**保存为 PNG 并返回路径**（拿 path 调 `describe_image` / `ocr_image`） |
 | `browser_install` | 安装 systemd 托管的共享浏览器后端 |
 | `browser_close` | 关闭会话 |
 

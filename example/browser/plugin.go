@@ -42,6 +42,24 @@ type Plugin struct {
 	stopOnce    sync.Once
 	profilesDir string // 持久化 profile 根目录（<data>/browser_profiles），空则禁用
 
+	// screenshotsDir 是截图落盘目录（<data>/browser_screenshots）。
+	//
+	// ★ 为何要落盘而不是直接回 base64（2026-10-10 修）：
+	//
+	//	工具结果是 JSON 文本，base64 PNG 会整段进模型上下文。
+	//	实测一次视口截图 100-500KB ⇒ base64 后 137-685KB
+	//	（约 3-17 万 token），而模型**看不见**这些字符里的图。
+	//
+	//	更糟的是它为每个消费方制造了同一道重复劳动：生产日志里 2026-10-10
+	//	那轮 agent 调 browser_screenshot 后紧跟着 cmd_run（自己 base64 解码
+	//	写文件），最后才 describe_image —— 它在**绕开**这个设计，
+	//	而那一轮跑了 920 秒。
+	//
+	//	内核早已有约定：describe_image 的 path 参数描述写着
+	//	「★处理设备/工具回传的媒体时必须传（screensee / camerasue 会回传
+	//	file 路径）」。本插件返回路径才是合上这个约定。
+	screenshotsDir string
+
 	// 共享浏览器单例：所有 agent 共用一个 Chromium 进程（全局 UserDataDir，
 	// 登录态/cookies 跨 agent、跨会话、跨插件重启保留），每个 start 创建一个
 	// 新标签页（CDP Target）。同 source 复用自己的标签页。浏览器进程在
@@ -231,9 +249,11 @@ func (p *Plugin) Start(s *sdk.PluginSDK) error {
 	p.client = newHTTPClient(p.timeout, p.proxy)
 
 	// 持久化 profile 根目录：<data>/browser_profiles
+	// 截图落盘目录：<data>/browser_screenshots
 	if dd, err := s.Settings().GetCore("daemon.data_dir"); err == nil {
 		if s2, ok := dd.(string); ok && s2 != "" {
 			p.profilesDir = filepath.Join(s2, "browser_profiles")
+			p.screenshotsDir = filepath.Join(s2, "browser_screenshots")
 		}
 	}
 
@@ -319,14 +339,17 @@ func (p *Plugin) Start(s *sdk.PluginSDK) error {
 	}, p.handleNavigate)
 
 	s.RegisterTool(tp+"screenshot", sdk.ToolDef{
-		Name:        tp + "screenshot",
-		Description: "对交互式浏览器当前页面截图。返回 base64 编码的 PNG 图片。",
+		Name: tp + "screenshot",
+		Description: "对交互式浏览器当前页面截图，**保存为 PNG 文件并返回绝对路径**。" +
+			"要看图请拿返回的 path 调 describe_image(path=...)；要提取文字调 ocr_image(path=...)。" +
+			"（不再直接返回 base64——那样会把十几万 token 灌进上下文而你看不见图。）",
 		Parameters: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
 				"id":     map[string]interface{}{"type": "string", "description": "浏览器会话 ID"},
 				"full":   map[string]interface{}{"type": "boolean", "description": "是否全页截图(默认 false，仅视口)"},
 				"format": map[string]interface{}{"type": "string", "description": "图片格式: 仅支持 png(默认 png)"},
+				"inline": map[string]interface{}{"type": "boolean", "description": "可选：额外返回 base64/data_uri（默认 false）。仅当调用方拿不到文件系统时才需要；带上会把大段 base64 灌进上下文"},
 			},
 			"required": []string{"id"},
 		},
@@ -1142,14 +1165,72 @@ func (p *Plugin) handleScreenshot(args map[string]interface{}) (interface{}, err
 	if err != nil {
 		return errResult("screenshot failed: " + err.Error()), nil
 	}
-	b64 := base64.StdEncoding.EncodeToString(buf)
-	return map[string]interface{}{
-		"status":   "ok",
-		"format":   format,
-		"size":     len(buf),
-		"base64":   b64,
-		"data_uri": fmt.Sprintf("data:image/png;base64,%s", b64),
-	}, nil
+
+	// ★ 默认落盘并返回**路径**（2026-10-10 改）。
+	//
+	// 为何不改回直接回 base64：那是把「解码 + 写文件」这件重复劳动
+	// 推给每一个消费方，而模型自己做不到（它看不见 base64 里的图）。
+	// 生产日志实证过 agent 的绕行链路：browser_screenshot → cmd_run 自己
+	// 解码写盘 → describe_image。
+	path, saveErr := p.saveScreenshot(buf, format, id)
+	if saveErr != nil {
+		// 落盘失败时不静默退回 base64：那会让「上下文被灌爆」这件事
+		// 在磁盘满/权限错时重新出现，而且没有迹象。
+		return errResult("screenshot saved failed: " + saveErr.Error()), nil
+	}
+
+	res := map[string]interface{}{
+		"status": "ok",
+		"format": format,
+		"size":   len(buf),
+		// path 是**主要返回值**：模型应拿它去调 describe_image / ocr_image，
+		// 或交给 files_* / cmd_run 做后续处理。
+		"path": path,
+		// hint 直接写在结果里：工具描述模型可能漏看，结果里的提示更近。
+		"hint": "截图已保存。要看图请调 describe_image(path=...)；" +
+			"要 OCR 请调 ocr_image(path=...)。不要再自己解码 base64。",
+	}
+
+	// inline=true 时才额外带 base64：只有确实拿不到文件系统
+	// （如前端要把图直接嵌进消息）的少数场景才该用。
+	if v, ok := args["inline"].(bool); ok && v {
+		b64 := base64.StdEncoding.EncodeToString(buf)
+		res["base64"] = b64
+		res["data_uri"] = fmt.Sprintf("data:image/png;base64,%s", b64)
+	}
+	return res, nil
+}
+
+// saveScreenshot 把截图写入 <data>/browser_screenshots/，返回**绝对路径**。
+//
+// 为何文件名带时间戳与会话 id：同一会话连续截图是常态（生产日志里一轮
+// 内截了 3 次），固定文件名会互相覆盖，而 agent 很可能还想回看前一张。
+// 时间戳用 `20060102-150405.000`（毫秒）：同秒内多次截图也不撞名。
+func (p *Plugin) saveScreenshot(buf []byte, format, sessionID string) (string, error) {
+	dir := p.screenshotsDir
+	if dir == "" {
+		// 未注入 data_dir（如测试环境）时退到临时目录，而不是报错：
+		// 截图本身是成功的，只该降级存储位置。
+		dir = filepath.Join(os.TempDir(), "homeagent-browser-screenshots")
+	}
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return "", fmt.Errorf("创建截图目录 %s: %w", dir, err)
+	}
+	// 会话 id 由调用方传入，可能含路径分隔符 —— 过滤掉，
+	// 否则 `../` 能把截图写出目录外。
+	safeID := strings.Map(func(r rune) rune {
+		if r == '/' || r == '\\' || r == 0 {
+			return '_'
+		}
+		return r
+	}, sessionID)
+	name := fmt.Sprintf("shot-%s-%s.%s",
+		time.Now().Format("20060102-150405.000"), safeID, format)
+	full := filepath.Join(dir, name)
+	if err := os.WriteFile(full, buf, 0644); err != nil {
+		return "", fmt.Errorf("写入 %s: %w", full, err)
+	}
+	return full, nil
 }
 
 func (p *Plugin) handleHTML(args map[string]interface{}) (interface{}, error) {
