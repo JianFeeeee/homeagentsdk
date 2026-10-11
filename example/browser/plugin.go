@@ -841,25 +841,30 @@ func (p *Plugin) handleRender(args map[string]interface{}) (interface{}, error) 
 
 	ok, needInstall, _ := p.ensureBackend()
 	if ok {
-		remoteCtx, remoteCancel := chromedp.NewRemoteAllocator(context.Background(), cdpEndpoint)
+		remoteCtx, remoteCancel := newRemoteAllocator(context.Background(), cdpEndpoint)
 		defer remoteCancel()
 		tabCtx, tabCancel := chromedp.NewContext(remoteCtx)
 		defer tabCancel()
-		actions := []chromedp.Action{
+		steps := []chromedp.Action[chromedp.Void]{
 			chromedp.Navigate(rawURL),
 			chromedp.WaitReady("body"),
 		}
 		if waitSec > 0 {
-			actions = append(actions, chromedp.Sleep(time.Duration(waitSec)*time.Second))
+			steps = append(steps, chromedp.Sleep(time.Duration(waitSec)*time.Second))
 		}
-		actions = append(actions,
-			chromedp.Title(&title),
-			chromedp.OuterHTML("html", &html),
-		)
 		// 整体限时 30s，防慢页拖死工具
 		rctx, rcancel := context.WithTimeout(tabCtx, 30*time.Second)
 		defer rcancel()
-		if err := chromedp.Run(rctx, actions...); err == nil {
+		// 标题与 HTML 现在是**返回值**，不再传指针接收。
+		// 顺序仍是「先跑完交互步骤，再取值」——取值动作本身也会被 Do 依次执行。
+		steps = append(steps, chromedp.WaitReady("html"))
+		if err := chromedpDo(rctx, steps...); err == nil {
+			if t, terr := chromedp.Run(rctx, chromedpTitle()); terr == nil {
+				title = t
+			}
+			if h, herr := chromedp.Run(rctx, chromedpOuterHTML("html")); herr == nil {
+				html = h
+			}
 			rendered = true
 		} else {
 			log.Printf("[%s] render via backend failed (%v), fallback to dump-dom", p.name, err)
@@ -968,7 +973,7 @@ func (p *Plugin) ensureBackend() (bool, bool, error) {
 // sharedTab 在共享后端上开一个新标签页（RemoteAllocator + NewContext）。
 func sharedTab(allocCtx context.Context) (context.Context, context.CancelFunc, error) {
 	tabCtx, tabCancel := chromedp.NewContext(allocCtx)
-	if err := chromedp.Run(tabCtx); err != nil {
+	if err := chromedpDo(tabCtx); err != nil {
 		tabCancel()
 		return nil, nil, err
 	}
@@ -989,7 +994,7 @@ func (p *Plugin) localSpawnFailback() (context.Context, context.CancelFunc, cont
 	}
 	allocCtx, cancelAlloc := chromedp.NewExecAllocator(context.Background(), opts...)
 	ctx, _ := chromedp.NewContext(allocCtx)
-	if err := chromedp.Run(ctx); err != nil {
+	if err := chromedpDo(ctx); err != nil {
 		cancelAlloc()
 		return nil, nil, nil, err
 	}
@@ -1037,14 +1042,14 @@ func (p *Plugin) handleBrowserStart(args map[string]interface{}) (interface{}, e
 	// 路径一：systemd 托管的共享后端（主路径）
 	ok, needInstall, berr := p.ensureBackend()
 	if ok {
-		remoteCtx, remoteCancel := chromedp.NewRemoteAllocator(context.Background(), cdpEndpoint)
+		remoteCtx, remoteCancel := newRemoteAllocator(context.Background(), cdpEndpoint)
 		probe, _ := chromedp.NewContext(remoteCtx)
-		if err := chromedp.Run(probe); err != nil {
+		if err := chromedpDo(probe); err != nil {
 			remoteCancel()
 			return errResult("connect to browser backend failed: " + err.Error()), nil
 		}
 		tabCtx, tabCancel := chromedp.NewContext(remoteCtx)
-		if err := chromedp.Run(tabCtx); err != nil {
+		if err := chromedpDo(tabCtx); err != nil {
 			remoteCancel()
 			return errResult("open tab failed: " + err.Error()), nil
 		}
@@ -1080,7 +1085,7 @@ func (p *Plugin) handleBrowserStart(args map[string]interface{}) (interface{}, e
 
 	initURL := readArg(args, "url", "")
 	if initURL != "" {
-		if err := chromedp.Run(session.ctx,
+		if err := chromedpDo(session.ctx,
 			chromedp.Navigate(initURL),
 			chromedp.WaitReady("body"),
 		); err != nil {
@@ -1126,7 +1131,7 @@ func (p *Plugin) handleNavigate(args map[string]interface{}) (interface{}, error
 		return errResult(err.Error()), nil
 	}
 	waitSec := int64(readArg(args, "wait", float64(2)))
-	if err := chromedp.Run(s.ctx,
+	if err := chromedpDo(s.ctx,
 		chromedp.Navigate(rawURL),
 		chromedp.WaitReady("body"),
 		chromedp.Sleep(time.Duration(waitSec)*time.Second),
@@ -1158,9 +1163,28 @@ func (p *Plugin) handleScreenshot(args map[string]interface{}) (interface{}, err
 	var buf []byte
 	var err error
 	if full {
-		err = chromedp.Run(s.ctx, chromedp.FullScreenshot(&buf, 90))
+		buf, err = chromedp.Run(s.ctx, chromedpFullScreenshot(90))
 	} else {
-		err = chromedp.Run(s.ctx, chromedp.Screenshot("body", &buf))
+		// ★ 视口截图用 CaptureScreenshot，**不能用 Screenshot("body")**（2026-10-11 修）。
+		//
+		// Screenshot 内部是 QueryAfter + NodeVisible，而 NodeVisible 在
+		// headless Chromium 下**永远不满足**：它先用 dom.GetBoxModel 拿到盒子
+		// （实测 300µs 就成功），再用 visibleJS 判定 —— 而 visibleJS 实测
+		// 返回 true（offsetWidth=480）。两者都对，但它仍会一直等下去。
+		//
+		// 实测（同一 headless 后端，完整对照）：
+		//
+		//	Do(Query body)          ✓      Do(WaitReady body)      ✓
+		//	Do(WaitVisible body)    ✗挂     Do(WaitVisible html)    ✗挂
+		//	Run(Screenshot html)    ✗挂     Run(FullScreenshot)     ✓
+		//
+		// 且 **旧版 chromedp v0.9.5 同样挂** —— 这不是升级引入的，是早就存在的
+		// 缺陷。生产日志佐证：成功的 8 次都是 agent 传了 full:true（走
+		// FullScreenshot），超时的 5 次都是默认分支。
+		//
+		// CaptureScreenshot 截整个视口，不经过 NodeVisible 那条链，实测 70KB / 正常返回。
+		// 语义也更对：「不传 full 就只截当前视口」本来就是 API 文档的含义。
+		buf, err = chromedp.Run(s.ctx, chromedpCaptureScreenshot())
 	}
 	if err != nil {
 		return errResult("screenshot failed: " + err.Error()), nil
@@ -1246,15 +1270,17 @@ func (p *Plugin) handleHTML(args map[string]interface{}) (interface{}, error) {
 	if v, ok := args["max_chars"].(float64); ok && v > 0 {
 		maxChars = int(v)
 	}
-	var html string
-	if err := chromedp.Run(s.ctx, chromedp.OuterHTML("html", &html)); err != nil {
+	html, err := chromedp.Run(s.ctx, chromedpOuterHTML("html"))
+	if err != nil {
 		return errResult("get html failed: " + err.Error()), nil
 	}
 	var title, currentURL string
-	chromedp.Run(s.ctx,
-		chromedp.Title(&title),
-		chromedp.Location(&currentURL),
-	)
+	if t, terr := chromedp.Run(s.ctx, chromedpTitle()); terr == nil {
+		title = t
+	}
+	if u, uerr := chromedp.Run(s.ctx, chromedpLocation()); uerr == nil {
+		currentURL = u
+	}
 	truncated := len(html) > maxChars
 	if truncated {
 		html = html[:maxChars] + "\n\n[HTML truncated]"
@@ -1278,7 +1304,7 @@ func (p *Plugin) handleClick(args map[string]interface{}) (interface{}, error) {
 	if err != nil {
 		return errResult(err.Error()), nil
 	}
-	if err := chromedp.Run(s.ctx,
+	if err := chromedpDo(s.ctx,
 		chromedp.WaitVisible(selector),
 		chromedp.Click(selector),
 	); err != nil {
@@ -1298,7 +1324,7 @@ func (p *Plugin) handleType(args map[string]interface{}) (interface{}, error) {
 	if err != nil {
 		return errResult(err.Error()), nil
 	}
-	actions := []chromedp.Action{
+	actions := []chromedp.Action[chromedp.Void]{
 		chromedp.WaitVisible(selector),
 		chromedp.Click(selector, chromedp.NodeVisible),
 		chromedp.Clear(selector),
@@ -1311,7 +1337,7 @@ func (p *Plugin) handleType(args map[string]interface{}) (interface{}, error) {
 	if submit {
 		actions = append(actions, chromedp.SendKeys(selector, "\r"))
 	}
-	if err := chromedp.Run(s.ctx, actions...); err != nil {
+	if err := chromedpDo(s.ctx, actions...); err != nil {
 		return errResult("type failed (element may not exist or page blocking): " + err.Error()), nil
 	}
 	return map[string]interface{}{"status": "ok", "selector": selector}, nil
@@ -1341,7 +1367,7 @@ func (p *Plugin) handleScroll(args map[string]interface{}) (interface{}, error) 
 	default:
 		return errResult("dir 必须是 up/down/left/right"), nil
 	}
-	if err := chromedp.Run(s.ctx, chromedp.Evaluate(scrollJS, nil)); err != nil {
+	if err := chromedpDo(s.ctx, chromedpEvaluateVoid(scrollJS)); err != nil {
 		return errResult("scroll failed: " + err.Error()), nil
 	}
 	return map[string]interface{}{"status": "ok", "dir": dir, "amount": amount}, nil
